@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-正在准备 V0.3 — Add Tool System 发布：包含三层工具系统、支持按行读取的 `read_file`、关键词搜索 `grep`，以及逐次确认后执行的 `write_file` 和 `bash`，工具统一位于 `harness/tools/`，284 项离线测试通过。查询引擎继续支持限速流式显示、自动与手动上下文压缩、工具结果截断及有限重试。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
+V0.3 — Add Tool System 已公开发布：包含三层工具系统、支持按行读取的 `read_file`、关键词搜索 `grep`，以及逐次确认后执行的 `write_file` 和 `bash`，工具统一位于 `harness/tools/`，284 项离线测试通过。查询引擎继续支持限速流式显示、自动与手动上下文压缩、工具结果截断及有限重试。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
 
-最近公开版本为 [V0.2 query engine](https://github.com/MichaelJiangg/harness/releases/tag/v0.2) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.2`。
+最近公开版本为 [V0.3 — Add Tool System](https://github.com/MichaelJiangg/harness/releases/tag/v0.3) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.3`，指向功能提交 `a667722`。
 
 ## 已完成
 
@@ -62,10 +62,11 @@
 - 搜索沿用工作目录、敏感路径、UTF-8 和 1 MiB 限制，不递归目录软链接；逐项跳过不可读、二进制、无效编码及过大文件并报告计数，支持扫描中取消。CR／LF／CRLF 按物理行计数，换页符不增加行号。
 - 新增 40 项搜索与集成测试，全部 284 项离线测试通过，覆盖注册、关键词和文件名筛选、数量与长度边界、路径限制、错误后修正、调用标识与用量记录，以及非交互 CLI 搜索。
 - 整理 V0.3 — Add Tool System 版本说明；导出待发布的 42 个文件独立运行 284 项测试和帮助入口，全部通过。发布清单不含 `.env`、缓存和本地 `hello.txt`，常见凭据模式扫描未发现匹配。
+- 经用户授权将工具系统公开发布为 V0.3；Git 标签不允许空格，采用 `v0.3`，Release 标题为「V0.3 — Add Tool System」。Git 直连超时后通过 Git Database API 同步相同 Git 对象，远端提交、注解标签与本地哈希一致，42 个发布文件逐项核对通过；Release 为正式版本并标记为 Latest。
 
 ## 进行中
 
-- 用户已授权将当前工具系统更新到 GitHub 并发布 V0.3。Git 标签不允许空格，因此标签采用 `v0.3`，Release 标题为「V0.3 — Add Tool System」；发布清单与远端已核对。Git 直连 github.com:443 超时，GitHub API 可正常访问，采用 Git Database API 上传同一提交并核对哈希，随后创建标签和 Release。
+- 无。
 
 ## 待办
 
@@ -79,6 +80,7 @@
 
 ## 最近验证
 
+- 2026-09-18：通过 GitHub API 核验 `v0.3` 指向功能提交 `a667722052984affd452281264d8460ca0981fd9`，远端 42 个文件的模式与 blob 哈希逐项等于本地发布快照。`gh release view v0.3` 确認名称、标签、非草稿和非预发布状态；Latest API 返回 V0.3。未上传实际 `.env`、密钥、缓存或 `hello.txt`。
 - 2026-09-18：V0.3 发布快照包含 42 个文件，独立临时目录中的 284 项离线测试和帮助入口通过，`git diff --cached --check` 通过；允许清单核对及常见凭据模式扫描通过。GitHub API 确认仓库 public、默认分支 main、远端与本地发布前提交一致，尚无 `v0.3` 标签或 Release。
 - 2026-09-18：执行 `python3 -m unittest discover -s tests -q`，284 项全部通过；`python3 -m harness --help` 通过。新增验证实际搜索与行号、Unicode／字面关键词、`*.py` 与范围筛选、JSON 转义后的长度、完整结果条目、超长行保留关键词、路径和软链接限制、不可读文件／目录跳过、取消、错误后修正与非交互查询循环；测试使用临时文件和模拟模型，未读取实际密钥、未调用真实 API、未推送或发布。
 - 2026-09-18：执行 `python3 -m unittest discover -s tests -q`，244 项全部通过；`python3 -m harness --help` 与 `git diff --check` 通过。覆盖成功及非零退出、命令不存在、stdout／stderr 分别回传、超时部分输出、同组子进程清理、持续双路大量输出、取消、命令确认及拒绝、EOF、输出读取故障、实际退出码保留、长结果严格限长及模型工具循环重试不重复执行。新增命令测试使用临时目录和无害本地子进程，未读取实际密钥、未调用真实 API、未推送或发布。
