@@ -47,7 +47,8 @@ V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/h
 ## 阻塞与待确认
 
 - GitHub 连接器可识别账号 `MichaelJiangg`，但查询 `MichaelJiangg/harness` 返回 404，未找到可访问的同名仓库；用户已确认新建公开仓库。
-- 本机 `gh` 未登录，连接器不提供创建仓库或发布 Release 的接口，浏览器连接超时；需完成 `gh auth login`。推送、远端配置、标签和 Release 尚未执行。
+- 通过本机已启用的代理恢复了 CLI 的 GitHub 连接，已发起设备登录，等待用户完成 `gh` 授权。连接器不提供创建仓库或发布 Release 的接口。
+- 已配置本项目 `origin` 为 `https://github.com/MichaelJiangg/harness.git`；仓库创建、推送、标签和 Release 尚未执行。
 - 真实 API 联调待用户在本地 `.env` 或环境变量中配置密钥后验证，不影响离线测试。
 - `/exit` 停止后续循环，不保证中断在途 HTTP 或远端生成；退出时可能无法获取该请求最终用量。
 
