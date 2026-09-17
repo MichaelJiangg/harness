@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/harness`，拟使用标签 `v0.2`；GitHub 上传与 Release 尚未执行。Python 查询引擎已支持限速流式显示、自动与手动上下文压缩、工具结果截断及有限重试，已通过离线验证。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
+V0.2 query engine 已公开发布至 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，代码位于 `main`，版本标签为 `v0.2`，发布页为 [V0.2 query engine](https://github.com/MichaelJiangg/harness/releases/tag/v0.2) 。Python 查询引擎已支持限速流式显示、自动与手动上下文压缩、工具结果截断及有限重试，已通过离线验证。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
 
 ## 已完成
 
@@ -34,10 +34,11 @@ V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/h
 - 全部 101 项测试通过，覆盖新增上下文、截断、重试、压缩回滚与终端限速交互。
 - 整理 V0.2 query engine 版本说明，README 明确首次使用需自行创建 `.env`；本项目已初始化独立 `main` 仓库，不携带父级 `sushu` 历史。
 - 发布清单包含 24 个源码、测试和文档文件；`.env` 与 Python 缓存已排除，常见凭据模式扫描未发现匹配。
+- 经用户确认创建 GitHub 公开仓库 `MichaelJiangg/harness`，推送 `main` 和 `v0.2` 标签，并发布正式 Release「V0.2 query engine」。已核验仓库可见性为 public，Release 非草稿、非预发布。
 
 ## 进行中
 
-- 用户已确认公开发布：将 `main` 上传至 GitHub 的 `MichaelJiangg/harness`，创建 `v0.2` 标签及 `V0.2 query engine` Release；等待 CLI 登录完成。
+- 无。
 
 ## 待办
 
@@ -46,14 +47,12 @@ V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/h
 
 ## 阻塞与待确认
 
-- GitHub 连接器可识别账号 `MichaelJiangg`，但查询 `MichaelJiangg/harness` 返回 404，未找到可访问的同名仓库；用户已确认新建公开仓库。
-- 通过本机已启用的代理恢复了 CLI 的 GitHub 连接，已发起设备登录，等待用户完成 `gh` 授权。连接器不提供创建仓库或发布 Release 的接口。
-- 已配置本项目 `origin` 为 `https://github.com/MichaelJiangg/harness.git`；仓库创建、推送、标签和 Release 尚未执行。
 - 真实 API 联调待用户在本地 `.env` 或环境变量中配置密钥后验证，不影响离线测试。
 - `/exit` 停止后续循环，不保证中断在途 HTTP 或远端生成；退出时可能无法获取该请求最终用量。
 
 ## 最近验证
 
+- 2026-09-18：GitHub 连接器确认 `MichaelJiangg/harness` 为公开仓库、默认分支为 `main`；`gh release view v0.2` 确认标题、标签及正式发布状态。发布文件仍为 24 个源码、测试和文档文件，未上传 `.env` 或缓存。
 - 2026-09-18：V0.2 发布准备阶段重新执行 `python3 -m unittest discover -s tests -q`，101 项全部通过；`python3 -m harness --help` 正常退出。独立仓库的 `git check-ignore .env` 返回 `.env`，发布文件清单扫描通过，未读取实际密钥或调用真实模型 API。
 - 2026-09-18：执行 `python3 -m unittest discover -s tests -q`，101 项全部通过。验证最近轮次与工具链完整保留、压缩次数跨轮累计、摘要与重试共同计费、长结果严格限长、限速等待期间命令响应，以及 `/compact` 提交和失败回滚；未访问真实 API 或读取实际密钥。
 - 2026-09-18：流式显示改造后执行 `python3 -m unittest discover -s tests -q`，61 项全部通过。使用模拟 SSE 流验证即时刷新、多工具分片、断流与用量记录；未调用真实 API。
