@@ -37,7 +37,7 @@ V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/h
 
 ## 进行中
 
-- 准备将 `main` 上传至 GitHub 的 `MichaelJiangg/harness`，创建 `v0.2` 标签及 `V0.2 query engine` Release，等待发布确认和 CLI 登录。
+- 用户已确认公开发布：将 `main` 上传至 GitHub 的 `MichaelJiangg/harness`，创建 `v0.2` 标签及 `V0.2 query engine` Release；等待 CLI 登录完成。
 
 ## 待办
 
@@ -46,7 +46,7 @@ V0.2 query engine 已完成本地发布准备，目标仓库为 `MichaelJiangg/h
 
 ## 阻塞与待确认
 
-- GitHub 连接器可识别账号 `MichaelJiangg`，但查询 `MichaelJiangg/harness` 返回 404，未找到可访问的同名仓库；需确认新仓库可见性。
+- GitHub 连接器可识别账号 `MichaelJiangg`，但查询 `MichaelJiangg/harness` 返回 404，未找到可访问的同名仓库；用户已确认新建公开仓库。
 - 本机 `gh` 未登录，连接器不提供创建仓库或发布 Release 的接口，浏览器连接超时；需完成 `gh auth login`。推送、远端配置、标签和 Release 尚未执行。
 - 真实 API 联调待用户在本地 `.env` 或环境变量中配置密钥后验证，不影响离线测试。
 - `/exit` 停止后续循环，不保证中断在途 HTTP 或远端生成；退出时可能无法获取该请求最终用量。

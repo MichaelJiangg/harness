@@ -6,6 +6,13 @@
 
 ## 启动
 
+从 GitHub 下载项目并进入目录：
+
+```sh
+git clone https://github.com/MichaelJiangg/harness.git
+cd harness
+```
+
 首次使用，在项目根目录创建 `.env` 并填写密钥（该文件不会随仓库发布）：
 
 ```dotenv
