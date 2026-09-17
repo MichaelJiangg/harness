@@ -161,5 +161,109 @@ class ToolResultTruncationTests(unittest.TestCase):
                 truncate_tool_result({"message": "长" * 1000}, max_chars=limit)
 
 
+class BashResultTruncationTests(unittest.TestCase):
+    def result(self, stdout="", stderr="", **metadata):
+        return {
+            "tool": "bash", "status": "error", "executed": True,
+            "stdout": stdout, "stderr": stderr, "exit_code": 7,
+            "timed_out": False, "cancelled": False,
+            "stdout_truncated": False, "stderr_truncated": False,
+            "stdout_bytes": len(stdout.encode("utf-8")),
+            "stderr_bytes": len(stderr.encode("utf-8")),
+            "message": "命令退出，退出码为 7。", **metadata,
+        }
+
+    def test_short_command_result_keeps_original_serialization(self):
+        result = self.result("正常输出\n", "错误输出\n")
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertEqual(truncate_tool_result(result), encoded)
+        self.assertEqual(truncate_tool_result(result, len(encoded)), encoded)
+
+    def test_long_stdout_preserves_complete_stderr_and_command_metadata(self):
+        result = self.result("输出开始\n" + "x" * 20000 + "\n输出结束", "关键错误：文件不存在。\n")
+        original = deepcopy(result)
+        encoded = truncate_tool_result(result)
+        parsed = json.loads(encoded)
+        self.assertLessEqual(len(encoded), TOOL_RESULT_LIMIT)
+        self.assertTrue(parsed["stdout"].startswith("输出开始\n"))
+        self.assertTrue(parsed["stdout"].endswith("\n输出结束"))
+        self.assertIn("截断", parsed["stdout"])
+        self.assertEqual(parsed["stderr"], result["stderr"])
+        self.assertIs(parsed["stdout_truncated"], True)
+        self.assertIs(parsed["stderr_truncated"], False)
+        self.assertIs(parsed["truncated"], True)
+        self.assertEqual(parsed["original_chars"], len(json.dumps(result, ensure_ascii=False)))
+        for key in ("tool", "status", "executed", "exit_code", "timed_out", "cancelled",
+                    "stdout_bytes", "stderr_bytes", "message"):
+            self.assertEqual(parsed[key], result[key])
+        self.assertEqual(result, original)
+
+    def test_long_stderr_uses_budget_left_by_empty_stdout(self):
+        result = self.result(stderr="错误开始" + "x" * 20000 + "错误结束")
+        parsed = json.loads(truncate_tool_result(result))
+        self.assertEqual(parsed["stdout"], "")
+        self.assertIs(parsed["stdout_truncated"], False)
+        self.assertTrue(parsed["stderr"].startswith("错误开始"))
+        self.assertTrue(parsed["stderr"].endswith("错误结束"))
+        self.assertIs(parsed["stderr_truncated"], True)
+        self.assertGreater(len(parsed["stderr"]), 5000)
+
+    def test_both_outputs_keep_head_and_tail_independently(self):
+        result = self.result("OUT-HEAD" + "o" * 10000 + "OUT-TAIL",
+                             "ERR-HEAD" + "e" * 10000 + "ERR-TAIL",
+                             exit_code=-9, timed_out=True)
+        parsed = json.loads(truncate_tool_result(result, 1000))
+        for key, prefix in (("stdout", "OUT"), ("stderr", "ERR")):
+            self.assertTrue(parsed[key].startswith(prefix + "-HEAD"))
+            self.assertTrue(parsed[key].endswith(prefix + "-TAIL"))
+            self.assertIn("截断", parsed[key])
+            self.assertIs(parsed[key + "_truncated"], True)
+        self.assertEqual(parsed["exit_code"], -9)
+        self.assertIs(parsed["timed_out"], True)
+        self.assertLessEqual(len(truncate_tool_result(result, 1000)), 1000)
+
+    def test_escaped_and_unicode_outputs_obey_serialized_budget(self):
+        result = self.result('头中文😀"\\\n\t\x00' * 3000 + "尾正常",
+                             '头错误\x00\x01"\\\r' * 3000 + "尾错误")
+        for limit in (600, 1000, 6000):
+            with self.subTest(limit=limit):
+                encoded = truncate_tool_result(result, limit)
+                encoded.encode("utf-8")
+                parsed = json.loads(encoded)
+                self.assertLessEqual(len(encoded), limit)
+                self.assertTrue(parsed["stdout"].startswith("头"))
+                self.assertTrue(parsed["stdout"].endswith("尾正常"))
+                self.assertTrue(parsed["stderr"].startswith("头"))
+                self.assertTrue(parsed["stderr"].endswith("尾错误"))
+
+    def test_capture_truncation_flags_and_unknown_exit_code_survive(self):
+        result = self.result("已截断的短输出", "e" * 10000,
+                             stdout_truncated=True, stdout_bytes=99999,
+                             exit_code=None, cancelled=True)
+        parsed = json.loads(truncate_tool_result(result))
+        self.assertEqual(parsed["stdout"], result["stdout"])
+        self.assertIs(parsed["stdout_truncated"], True)
+        self.assertIs(parsed["stderr_truncated"], True)
+        self.assertEqual(parsed["stdout_bytes"], 99999)
+        self.assertIsNone(parsed["exit_code"])
+        self.assertIs(parsed["cancelled"], True)
+
+    def test_oversized_message_cannot_crowd_out_result_fields(self):
+        result = self.result(message="说明开始" + "m" * 20000 + "说明结束")
+        encoded = truncate_tool_result(result)
+        parsed = json.loads(encoded)
+        self.assertLessEqual(len(encoded), TOOL_RESULT_LIMIT)
+        self.assertEqual(parsed["stdout"], "")
+        self.assertEqual(parsed["stderr"], "")
+        self.assertEqual(parsed["exit_code"], 7)
+        self.assertTrue(parsed["message"].startswith("说明开始"))
+        self.assertTrue(parsed["message"].endswith("说明结束"))
+        self.assertIn("截断", parsed["message"])
+
+    def test_budget_too_small_for_command_fields_is_rejected(self):
+        with self.assertRaises(ValueError):
+            truncate_tool_result(self.result("x" * 10000, "e" * 10000), 100)
+
+
 if __name__ == "__main__":
     unittest.main()

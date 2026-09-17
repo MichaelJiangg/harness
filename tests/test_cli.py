@@ -5,6 +5,7 @@ from pathlib import Path
 from queue import Queue
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 from threading import Condition, Event, Thread
 import unittest
 from unittest.mock import Mock, patch
@@ -12,6 +13,7 @@ from unittest.mock import Mock, patch
 from harness.cli import HELP, run_cli
 from harness.client import DEFAULT_MODEL
 from harness.engine import query_loop
+from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
 
 
@@ -38,7 +40,7 @@ def reply(content="回答完成。", *, prompt=10, completion=5, hit=2, tool_cal
 TOOL_CALL = {
     "id": "call_read_1",
     "type": "function",
-    "function": {"name": "read_file", "arguments": '{"path":"/placeholder.txt"}'},
+    "function": {"name": "read_file", "arguments": '{"path":"example.txt"}'},
 }
 
 
@@ -184,11 +186,18 @@ class CLITests(unittest.TestCase):
         })
         client = Mock(complete=Mock(side_effect=[
             reply(None, tool_calls=[deepcopy(TOOL_CALL)]),
-            reply("工具未实现，未读取文件。", prompt=20, completion=3, hit=8),
+            reply("文件已经读取。", prompt=20, completion=3, hit=8),
         ]))
+        workspace = TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        content = "来自测试文件的内容，不应直接打印到终端。"
+        Path(workspace.name, "example.txt").write_text(content, encoding="utf-8")
+        factory = patch("harness.cli.create_tool_executor", return_value=create_tool_executor(workspace.name))
+        factory.start()
+        self.addCleanup(factory.stop)
         session = CLISession(client, ledger=ledger, lines=("读取文件\n",))
         try:
-            self.assertTrue(session.output.wait_for("DeepSeek > 工具未实现，未读取文件。"))
+            self.assertTrue(session.output.wait_for("DeepSeek > 文件已经读取。"))
             session.input.send("/cost\n")
             self.assertTrue(session.output.wait_for("模型请求：2 次。"))
             session.close()
@@ -196,7 +205,14 @@ class CLITests(unittest.TestCase):
             self.assertEqual(ledger.summary()["total_tokens"], 38)
             self.assertEqual([record["turn"] for record in ledger.records], [1, 1])
             output = session.output.getvalue()
-            self.assertIn("[工具占位] read_file：工具尚未实现，未执行任何操作。", output)
+            self.assertIn(f"[工具] read_file：已读取文件（{len(content)} 字符）。", output)
+            self.assertNotIn(content, output)
+            import json
+            message = next(item for item in client.complete.call_args_list[1].kwargs["messages"]
+                           if item["role"] == "tool")
+            result = json.loads(message["content"])
+            self.assertEqual(result["content"], content)
+            self.assertTrue(result["executed"])
             self.assertIn("Token 合计：输入 30，输出 8，合计 38。", output)
             self.assertIn("预估费用合计：USD 0.00007400", output)
             self.assertIn("[请求 #2／对话 1]", output)
@@ -230,6 +246,30 @@ class CLITests(unittest.TestCase):
         finally:
             release.set()
             session.close()
+
+    def test_read_file_workspace_is_captured_before_first_question(self):
+        import json
+
+        with TemporaryDirectory() as initial, TemporaryDirectory() as later:
+            Path(initial, "example.txt").write_text("启动目录的文件。", encoding="utf-8")
+            Path(later, "example.txt").write_text("其他目录的文件。", encoding="utf-8")
+            client = Mock(complete=Mock(side_effect=[
+                reply(None, tool_calls=[deepcopy(TOOL_CALL)]), reply("读取结束。"),
+            ]))
+            with patch("harness.tools.executor.Path.cwd", return_value=Path(initial)) as cwd:
+                session = CLISession(client)
+                try:
+                    self.assertTrue(session.output.wait_for(HELP))
+                    cwd.return_value = Path(later)
+                    session.input.send("读取文件\n")
+                    session.close()
+                    message = next(item for item in client.complete.call_args_list[1].kwargs["messages"]
+                                   if item["role"] == "tool")
+                    self.assertEqual(json.loads(message["content"])["content"], "启动目录的文件。")
+                    self.assertIn("[工具] read_file：已读取文件", session.output.getvalue())
+                    self.assertEqual(session.errors.getvalue(), "")
+                finally:
+                    session.close()
 
     def test_new_question_is_rejected_while_a_query_is_running(self):
         started = Event()
@@ -412,7 +452,7 @@ class CLITests(unittest.TestCase):
                 executor.assert_not_called()
                 client.complete.assert_called_once()
                 self.assertEqual(ledger.summary()["requests"], 1)
-                self.assertNotIn("[工具占位]", session.output.getvalue())
+                self.assertNotIn("[工具]", session.output.getvalue())
                 self.assertNotIn("DeepSeek >", session.output.getvalue())
                 self.assertEqual(session.errors.getvalue(), "")
             finally:

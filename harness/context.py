@@ -79,6 +79,9 @@ def truncate_tool_result(result, max_chars=TOOL_RESULT_LIMIT):
     serialized = json.dumps(result, ensure_ascii=False)
     if len(serialized) <= max_chars:
         return serialized
+    if (isinstance(result, dict) and result.get("tool") == "bash"
+            and all(isinstance(result.get(key), str) for key in ("stdout", "stderr"))):
+        return _truncate_command_result(result, len(serialized), max_chars)
 
     def envelope(keep):
         head_count = (keep + 1) // 2
@@ -100,3 +103,57 @@ def truncate_tool_result(result, max_chars=TOOL_RESULT_LIMIT):
         else:
             high = middle - 1
     return envelope(low)
+
+
+def _truncate_command_result(result, original_chars, max_chars):
+    """分别保留命令的两路输出，避免通用首尾封装丢失退出码或整路错误。"""
+    capped = {**result, "stdout": "", "stderr": "", "truncated": True,
+              "original_chars": original_chars}
+    for key in ("stdout", "stderr"):
+        capped[key + "_truncated"] = bool(result.get(key + "_truncated", False))
+    if isinstance(capped.get("message"), str):
+        capped["message"] = _truncate_text(capped["message"], 256)
+
+    def encode():
+        return json.dumps(capped, ensure_ascii=False, separators=(",", ":"))
+
+    available = max_chars - len(encode())
+    sizes = {key: _json_text_size(result[key]) for key in ("stdout", "stderr")}
+    marker_size = _json_text_size("\n[已截断]\n")
+    minimum = {key: min(size, marker_size) for key, size in sizes.items()}
+    if available < sum(minimum.values()):
+        raise ValueError("工具结果字符上限不足以容纳命令状态与截断标记。")
+
+    # 短输出完整保留时，把剩余预算让给长输出；两路都长则均分。
+    short, long = sorted(sizes, key=sizes.get)
+    short_budget = min(sizes[short], max(minimum[short], available // 2))
+    for key, budget in ((short, short_budget), (long, available - short_budget)):
+        capped[key] = _truncate_text(result[key], budget)
+        capped[key + "_truncated"] |= capped[key] != result[key]
+    return encode()
+
+
+def _json_text_size(text):
+    """JSON 字符串内容的实际字符成本，不含两侧引号。"""
+    return len(json.dumps(text, ensure_ascii=False)) - 2
+
+
+def _truncate_text(text, max_chars):
+    if _json_text_size(text) <= max_chars:
+        return text
+
+    def excerpt(keep):
+        head = (keep + 1) // 2
+        tail = keep // 2
+        return text[:head] + "\n[已截断]\n" + (text[-tail:] if tail else "")
+
+    if _json_text_size(excerpt(0)) > max_chars:
+        raise ValueError("工具结果字符上限不足以容纳截断标记。")
+    low, high = 0, min(len(text) - 1, max_chars)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if _json_text_size(excerpt(middle)) <= max_chars:
+            low = middle
+        else:
+            high = middle - 1
+    return excerpt(low)

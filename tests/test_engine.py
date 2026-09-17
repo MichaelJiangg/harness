@@ -6,7 +6,7 @@ from harness.engine import QueryAborted, QueryState, query_loop
 from harness.usage import UsageLedger
 
 
-def tool_call(call_id="call-1", name="read_file", arguments='{"path":"README.md"}'):
+def tool_call(call_id="call-1", name="test_read", arguments='{"path":"example.txt"}'):
     return {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
 
 
@@ -53,19 +53,30 @@ class QueryLoopTests(unittest.TestCase):
 
     def test_multiple_tools_and_rounds_preserve_assistant_and_results(self):
         import json
-        calls = [tool_call("first"), tool_call("second", "run_command", '{"command":"pwd"}')]
+        calls = [tool_call("first"), tool_call("second", "test_command", '{"command":"pwd"}')]
+        executed = []
+
+        def execute(name, arguments):
+            executed.append((name, arguments))
+            return {"status": "success", "executed": True, "tool": name, "message": "测试工具完成。"}
+
         state = self.make_state([
-            reply("我先查看", calls), reply(None, [tool_call("third")]), reply("工具未实现，未执行操作。"),
-        ])
-        self.assertEqual(query_loop(state), "工具未实现，未执行操作。")
+            reply("我先查看", calls), reply(None, [tool_call("third")]), reply("检查完成。"),
+        ], tool_executor=execute)
+        self.assertEqual(query_loop(state), "检查完成。")
         self.assertEqual(len(state.client.requests), 3)
         second_request = state.client.requests[1]["messages"]
         self.assertEqual(second_request[2]["tool_calls"], calls)
         self.assertEqual([item["tool_call_id"] for item in second_request[3:]], ["first", "second"])
         for item in second_request[3:]:
             self.assertEqual(item["role"], "tool")
-            self.assertEqual(json.loads(item["content"])["status"], "not_implemented")
-            self.assertFalse(json.loads(item["content"])["executed"])
+            self.assertEqual(json.loads(item["content"])["status"], "success")
+            self.assertTrue(json.loads(item["content"])["executed"])
+        self.assertEqual(executed, [
+            ("test_read", {"path": "example.txt"}),
+            ("test_command", {"command": "pwd"}),
+            ("test_read", {"path": "example.txt"}),
+        ])
         self.assertEqual(state.ledger.summary()["total_tokens"], 360)
         self.assertEqual([record["turn"] for record in state.ledger.records], [1, 1, 1])
 

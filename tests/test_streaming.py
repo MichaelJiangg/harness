@@ -3,7 +3,7 @@ import json
 from http.client import IncompleteRead
 from threading import Event, Thread
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from harness.client import DEFAULT_MODEL, DeepSeekClient
 from harness.engine import QueryState, query_loop
@@ -92,9 +92,9 @@ class StreamingIntegrationTests(unittest.TestCase):
         first = sse(
             delta("开始检查。", calls=[
                 {"index": 0, "id": "call_read", "type": "function",
-                 "function": {"name": "read_file", "arguments": '{"path":"'}},
+                 "function": {"name": "test_read", "arguments": '{"path":"'}},
                 {"index": 1, "id": "call_command", "type": "function",
-                 "function": {"name": "run_command", "arguments": '{"command":"'}},
+                 "function": {"name": "test_command", "arguments": '{"command":"'}},
             ]),
             delta(calls=[
                 {"index": 1, "function": {"arguments": 'pwd"}'}},
@@ -102,7 +102,7 @@ class StreamingIntegrationTests(unittest.TestCase):
             ], reason="tool_calls"),
             usage(), "[DONE]",
         )
-        responses = [first, sse(delta("工具尚未实现。", reason="stop"), usage(20, 3), "[DONE]")]
+        responses = [first, sse(delta("检查完成。", reason="stop"), usage(20, 3), "[DONE]")]
         requests = []
         events = []
 
@@ -110,9 +110,11 @@ class StreamingIntegrationTests(unittest.TestCase):
             requests.append(json.loads(request.data))
             return io.BytesIO(responses.pop(0))
 
-        state = QueryState(DeepSeekClient("test-key", opener=opener), UsageLedger(), on_event=events.append)
+        execute = Mock(return_value={"status": "success", "executed": True, "message": "测试工具完成。"})
+        state = QueryState(DeepSeekClient("test-key", opener=opener), UsageLedger(),
+                           on_event=events.append, tool_executor=execute)
         state.messages.append({"role": "user", "content": "检查项目"})
-        self.assertEqual(query_loop(state), "工具尚未实现。")
+        self.assertEqual(query_loop(state), "检查完成。")
         self.assertEqual(len(requests), 2)
         messages = requests[1]["messages"]
         calls = messages[2]["tool_calls"]
@@ -123,10 +125,13 @@ class StreamingIntegrationTests(unittest.TestCase):
         self.assertEqual([message["tool_call_id"] for message in messages[3:]], ["call_read", "call_command"])
         for message in messages[3:]:
             result = json.loads(message["content"])
-            self.assertEqual(result["status"], "not_implemented")
-            self.assertFalse(result["executed"])
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(result["executed"])
+        self.assertEqual([call.args for call in execute.call_args_list], [
+            ("test_read", {"path": "说明.md"}), ("test_command", {"command": "pwd"}),
+        ])
         self.assertEqual([event["text"] for event in events if event["type"] == "text"], [
-            "开始检查。", "工具尚未实现。",
+            "开始检查。", "检查完成。",
         ])
         self.assertEqual([record["total_tokens"] for record in state.ledger.records], [15, 23])
         self.assertEqual([record["turn"] for record in state.ledger.records], [1, 1])
@@ -135,7 +140,7 @@ class StreamingIntegrationTests(unittest.TestCase):
     def test_cost_remains_available_between_stream_fragments_and_counts_finished_requests(self):
         first = io.BytesIO(sse(delta(calls=[{
             "index": 0, "id": "call_read", "type": "function",
-            "function": {"name": "read_file", "arguments": '{"path":"README.md"}'},
+            "function": {"name": "test_read", "arguments": '{"path":"example.txt"}'},
         }], reason="tool_calls"), usage(), "[DONE]"))
         second = PausedResponse(
             sse(delta("正在说明")),
@@ -144,6 +149,10 @@ class StreamingIntegrationTests(unittest.TestCase):
         responses = [first, second]
         client = DeepSeekClient("test-key", opener=lambda *args, **kwargs: responses.pop(0))
         ledger = UsageLedger()
+        execute = Mock(return_value={"status": "success", "executed": True, "message": "测试工具完成。"})
+        factory = patch("harness.cli.create_tool_executor", return_value=execute)
+        factory.start()
+        self.addCleanup(factory.stop)
         session = CLISession(client, ledger=ledger, lines=("读取文件\n",))
         try:
             self.assertTrue(second.waiting.wait(3))
