@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第四部分权限系统已实现并验证，正在准备发布 V0.4：包含 Bash 启发式风险分级、前置权限检查、有信息量的拒绝说明、当前会话目录授权和脱敏审计，423 项离线测试全部通过。规则按禁止优先、数值优先级、声明顺序匹配，项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11。查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
+第四部分权限系统已公开发布为 V0.4：包含 Bash 启发式风险分级、前置权限检查、有信息量的拒绝说明、当前会话目录授权和脱敏审计，423 项离线测试全部通过。规则按禁止优先、数值优先级、声明顺序匹配，项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11。查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。主入口为 `python3 -m harness`，核心函数为 `harness/engine.py` 的 `query_loop(state)`。
 
-最近公开版本为 [V0.3 — Add Tool System](https://github.com/MichaelJiangg/harness/releases/tag/v0.3) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.3`，指向功能提交 `a667722`。
+最近公开版本为 [V0.4 — Add-Permission System](https://github.com/MichaelJiangg/harness/releases/tag/v0.4) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.4`，指向功能提交 `8e33390`。
 
 ## 已完成
 
@@ -77,10 +77,11 @@
 - CLI 写入预览展示完整内容与父目录授权范围；明确批准且成功写入后，同目录及子目录在当前会话内复用，失败不记忆、重启失效、禁止规则优先。Bash 不记忆；嵌入式执行器须显式提供会话缓存。
 - 新增私有 JSONL 审计 `.harness/permission.log`，记录会话、调用、风险、规则、决策与确认状态，正文、原始命令及搜索词不入日志；无法安全落盘则阻止执行。日志目录排除 Git 并由文件读写／搜索工具保护，拒绝链接和特殊文件；排他创建修复 macOS 首次并发写日志竞争。
 - V0.4 全部 423 项离线测试通过，规范、README、CHANGELOG 与项目版本 `0.4.0` 已同步；未增加第三方运行依赖。
+- 经用户授权公开发布 V0.4：通过 Git Database API 同步相同提交和注解标签，远端 56 个文件的模式与 blob 哈希逐项一致；Release「V0.4 — Add-Permission System」为正式版并设为 Latest。发布不包含 `.env`、日志、缓存或本地 `hello.txt`。
 
 ## 进行中
 
-- 已获用户授权，正在校验发布快照并同步 GitHub V0.4，标签 `v0.4`、Release 标题「V0.4 — Add-Permission System」。Git HTTPS 连接超时，GitHub API 可用，将同步并核验相同 Git 对象。
+- 无。
 
 ## 待办
 
@@ -94,6 +95,7 @@
 
 ## 最近验证
 
+- 2026-09-18：56 个文件的独立发布快照中，423 项离线测试与帮助入口通过。GitHub API 核验远端功能提交为 `8e33390b312df3902a857b4756ab3b81a53f7e3c`，注解标签 `235d51f3a9472fe45bb73462eb0c336cae055ee3` 与本地一致，`v0.4` 指向功能提交；远端文件模式及哈希全部一致。Latest Release 返回 V0.4、非草稿、非预发布；Git HTTPS 连接超时后使用 Git Database API 完成同步。
 - 2026-09-18：临时工作目录运行全部 423 项离线测试通过，帮助入口及差异检查通过。新增覆盖 Bash 启发式与环境隔离、会话授权／禁止优先、拒绝说明、日志脱敏／落盘失败、规则目录自身软链接及审计期间路径变化。已定位并修复 macOS 首次并发创建日志的竞争，19 项审计测试及连续 100 轮并发验证通过，累计核验 8000 条完整日志。候选发布文件 56 个，常见凭据模式扫描无匹配，排除 `.env`、`.harness/`、缓存和本地 `hello.txt`；未调用真实 DeepSeek API。
 - 2026-09-18：执行 `python3 -m unittest discover -s tests -q`，375 项全部通过；`python3 -m harness --help` 与 `git diff --check` 通过。先复现确认后软链接改指向被禁目录的失败，再增加执行前复核并通过回归；覆盖大小写和 Unicode 别名、尚未创建的目录、目录免确认、复合命令正则禁止、配置快照及非法正则。未调用真实 API，尚未提交／推送或发布本轮变更。
 - 2026-09-18：执行 `python3 -m unittest discover -s tests -q`，346 项全部通过；`python3 -m harness --help` 与 `git diff --check` 通过。验证只读默认无确认、写入中风险、每次命令警告先于完整预览、看似只读的 Bash 仍须确认、只读显式询问及明确禁止优先；拒绝／回车／EOF／非交互等原有保护回归通过。使用模拟模型与临时文件，未调用真实 API、未推送或发布本轮变更。
