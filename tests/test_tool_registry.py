@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 from pkgutil import ModuleInfo
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, call, patch
 
+from harness.permissions import PermissionPolicy
 from harness.tools import REGISTRY, ToolRegistry, execute_tool, get_tool_definitions
 from harness.tools.definition import ToolDefinition
 
@@ -32,15 +34,11 @@ class ToolRegistryTests(unittest.TestCase):
         descriptions = get_tool_definitions()
         write_tool, write_handler = REGISTRY.get("write_file")
         self.assertTrue(callable(write_handler))
-        self.assertTrue(write_tool.requires_confirmation)
-        self.assertFalse(tool.requires_confirmation)
         bash_tool, bash_handler = REGISTRY.get("bash")
         self.assertTrue(callable(bash_handler))
-        self.assertTrue(bash_tool.requires_confirmation)
         self.assertTrue(bash_tool.supports_cancellation)
         search_tool, search_handler = REGISTRY.get("grep")
         self.assertTrue(callable(search_handler))
-        self.assertFalse(search_tool.requires_confirmation)
         self.assertTrue(search_tool.supports_cancellation)
         self.assertEqual(descriptions, [bash_tool.to_deepseek(), search_tool.to_deepseek(),
                                         tool.to_deepseek(), write_tool.to_deepseek()])
@@ -139,7 +137,10 @@ class ToolExecutorValidationTests(unittest.TestCase):
         self.registry_patch = patch("harness.tools.executor.REGISTRY", self.registry)
         self.registry_patch.start()
         self.addCleanup(self.registry_patch.stop)
-        self.workspace = Path("/tool-workspace")
+        workspace = TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.workspace = Path(workspace.name).resolve()
+        self.permissions = PermissionPolicy(allow=["example", "long_running"])
 
     def test_schema_validation_rejects_bad_arguments_before_execution(self):
         invalid = [None, [], "path", 1, True, {}, {"path": ""}, {"path": 1},
@@ -150,7 +151,8 @@ class ToolExecutorValidationTests(unittest.TestCase):
             invalid.append({"path": "file", "limit": value})
         for arguments in invalid:
             with self.subTest(arguments=arguments):
-                result = execute_tool("example", arguments, workspace=self.workspace)
+                result = execute_tool("example", arguments, workspace=self.workspace,
+                                      permissions=self.permissions)
                 self.assertEqual(result["status"], "error")
                 self.assertEqual(result["code"], "invalid_arguments")
                 self.assertFalse(result["executed"])
@@ -162,7 +164,8 @@ class ToolExecutorValidationTests(unittest.TestCase):
                           {"path": "file", "offset": 50, "limit": 100}):
             with self.subTest(arguments=arguments):
                 original = dict(arguments)
-                result = execute_tool("example", arguments, workspace=self.workspace)
+                result = execute_tool("example", arguments, workspace=self.workspace,
+                                      permissions=self.permissions)
                 self.handler.assert_called_with(original, self.workspace)
                 self.assertEqual(arguments, original)
                 self.assertEqual(result["status"], "success")
@@ -179,21 +182,24 @@ class ToolExecutorValidationTests(unittest.TestCase):
         self.registry.register(ToolDefinition("bounded", "有限超时。", {
             "type": "object", "properties": {"timeout": {"type": "integer", "minimum": 1, "maximum": 120}},
             "required": ["timeout"], "additionalProperties": False,
-        }, requires_confirmation=True), self.handler)
+        }), self.handler)
         confirm = Mock(return_value=True)
         for value in (0, 121, True, 1.5, "30"):
             with self.subTest(value=value):
-                result = execute_tool("bounded", {"timeout": value}, confirm=confirm)
+                result = execute_tool("bounded", {"timeout": value}, confirm=confirm,
+                                      workspace=self.workspace)
                 self.assertEqual(result["code"], "invalid_arguments")
         confirm.assert_not_called()
         self.handler.assert_not_called()
         for value in (1, 120):
-            self.assertTrue(execute_tool("bounded", {"timeout": value}, confirm=confirm)["executed"])
+            self.assertTrue(execute_tool("bounded", {"timeout": value}, confirm=confirm,
+                                         workspace=self.workspace)["executed"])
         self.assertEqual(self.handler.call_count, 2)
 
     def test_started_tool_failure_is_preserved_as_executed(self):
         self.handler.return_value = {"status": "error", "exit_code": 7, "stdout": "部分输出", "stderr": "错误输出"}
-        result = execute_tool("example", {"path": "file"}, workspace=self.workspace)
+        result = execute_tool("example", {"path": "file"}, workspace=self.workspace,
+                              permissions=self.permissions)
         self.assertEqual(result["status"], "error")
         self.assertTrue(result["executed"])
         self.assertEqual(result["exit_code"], 7)
@@ -205,10 +211,12 @@ class ToolExecutorValidationTests(unittest.TestCase):
         abort = Event()
         self.registry.register(ToolDefinition("long_running", "可以取消。", {"type": "object"},
                                               supports_cancellation=True), self.handler)
-        execute_tool("long_running", {}, workspace=self.workspace, abort=abort)
+        execute_tool("long_running", {}, workspace=self.workspace, abort=abort,
+                     permissions=self.permissions)
         self.handler.assert_called_once_with({}, self.workspace, abort=abort)
         self.handler.reset_mock()
-        execute_tool("example", {"path": "file"}, workspace=self.workspace, abort=abort)
+        execute_tool("example", {"path": "file"}, workspace=self.workspace, abort=abort,
+                     permissions=self.permissions)
         self.handler.assert_called_once_with({"path": "file"}, self.workspace)
 
 

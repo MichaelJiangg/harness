@@ -88,8 +88,8 @@ class ConfigTests(unittest.TestCase):
     def test_main_passes_loaded_key_to_client(self):
         with patch("sys.argv", ["harness"]):
             with patch.object(entrypoint, "load_api_key", return_value="test-value") as load:
-                with patch.object(entrypoint, "DeepSeekClient") as client:
-                    with patch.object(entrypoint, "run_cli") as run_cli:
+                with patch("harness.client.DeepSeekClient") as client:
+                    with patch("harness.cli.run_cli") as run_cli:
                         self.assertEqual(entrypoint.main(), 0)
         load.assert_called_once_with()
         client.assert_called_once_with("test-value")

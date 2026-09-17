@@ -11,6 +11,7 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
+from harness.permissions import PermissionPolicy
 from harness.tools.bash import DEFINITION, DEFAULT_TIMEOUT, MAX_OUTPUT_BYTES, execute
 from harness.tools.executor import ToolError
 
@@ -38,7 +39,7 @@ class BashTests(unittest.TestCase):
         self.assertNotIn("private details", str(caught.exception))
 
     def test_definition_requires_confirmation_and_cancellation_with_bounded_timeout(self):
-        self.assertTrue(DEFINITION.requires_confirmation)
+        self.assertEqual(PermissionPolicy().check(DEFINITION.name), "ask")
         self.assertTrue(DEFINITION.supports_cancellation)
         schema = DEFINITION.to_deepseek()["function"]["parameters"]
         self.assertEqual(set(schema["properties"]), {"command", "timeout"})

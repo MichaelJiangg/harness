@@ -3,11 +3,14 @@
 import json
 from copy import deepcopy
 
+from .config import get_settings
 
-DEFAULT_CONTEXT_LIMIT = 24000
-DEFAULT_SUMMARY_LIMIT = 2000
-KEEP_RECENT_TURNS = 4
-TOOL_RESULT_LIMIT = 6000
+
+_CONTEXT = get_settings()["context"]
+DEFAULT_CONTEXT_LIMIT = _CONTEXT["max_chars"]
+DEFAULT_SUMMARY_LIMIT = _CONTEXT["summary_chars"]
+KEEP_RECENT_TURNS = _CONTEXT["keep_recent_turns"]
+TOOL_RESULT_LIMIT = _CONTEXT["tool_result_chars"]
 
 
 def context_size(messages, tools):

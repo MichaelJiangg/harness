@@ -5,7 +5,10 @@ from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_MODEL = "deepseek-flash"
+from .config import get_settings
+
+_MODEL = get_settings()["model"]
+DEFAULT_MODEL = _MODEL["name"]
 
 
 class APIError(RuntimeError):
@@ -20,7 +23,7 @@ class APIError(RuntimeError):
 
 
 class DeepSeekClient:
-    def __init__(self, api_key, *, opener=urlopen, timeout=120):
+    def __init__(self, api_key, *, opener=urlopen, timeout=_MODEL["request_timeout"]):
         if not isinstance(api_key, str) or not api_key.strip():
             raise ValueError("请在项目 .env 或环境变量中设置 DEEPSEEK_API_KEY。")
         self._api_key = api_key.strip()
@@ -40,7 +43,7 @@ class DeepSeekClient:
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
         request = Request(
-            "https://api.deepseek.com/chat/completions",
+            _MODEL["endpoint"],
             method="POST",
             headers={
                 "Authorization": f"Bearer {self._api_key}",

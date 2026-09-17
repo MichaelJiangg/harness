@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from harness.engine import QueryState, query_loop
+from harness.permissions import PermissionPolicy
 from harness.tools import ToolRegistry, create_tool_executor, execute_tool
 from harness.tools.definition import ToolDefinition
 from harness.usage import UsageLedger
@@ -20,12 +21,14 @@ class ToolConfirmationTests(unittest.TestCase):
         self.registry.register(ToolDefinition("write", "需要确认的操作。", {
             "type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
             "required": ["path", "content"], "additionalProperties": False,
-        }, requires_confirmation=True), self.handler)
+        }), self.handler)
         registry_patch = patch("harness.tools.executor.REGISTRY", self.registry)
         registry_patch.start()
         self.addCleanup(registry_patch.stop)
         self.arguments = {"path": "note.txt", "content": "待确认内容。"}
-        self.workspace = Path("/tool-workspace")
+        workspace = TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.workspace = Path(workspace.name).resolve()
 
     def execute(self, **kwargs):
         return execute_tool("write", self.arguments, workspace=self.workspace, **kwargs)
@@ -95,7 +98,9 @@ class ToolConfirmationTests(unittest.TestCase):
     def test_read_only_tools_do_not_request_confirmation(self):
         self.registry.register(ToolDefinition("read", "无副作用。", {"type": "object"}), self.handler)
         confirm = Mock(side_effect=AssertionError("不应询问"))
-        self.assertTrue(execute_tool("read", {}, confirm=confirm)["executed"])
+        self.assertTrue(execute_tool("read", {}, confirm=confirm,
+                                     permissions=PermissionPolicy(allow=["read"]),
+                                     workspace=self.workspace)["executed"])
         confirm.assert_not_called()
 
     def test_factory_binds_workspace_and_passes_confirmation_and_cancellation(self):

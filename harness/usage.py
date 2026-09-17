@@ -1,24 +1,15 @@
 """Track per-request token usage and estimated session costs in memory."""
 
 from datetime import datetime, timezone
+from copy import deepcopy
 import math
 from threading import Lock
 import time
 
+from .config import get_settings
 
-PRICING = {
-    "input_hit_per_million": 0.003,
-    "input_miss_per_million": 0.15,
-    "output_per_million": 0.6,
-    "peak": {
-        "input_hit_per_million": 0.006,
-        "input_miss_per_million": 0.30,
-        "output_per_million": 1.2,
-    },
-    "currency": "USD",
-    "source": "https://api-docs.deepseek.com/quick_start/pricing",
-    "checked_at": "2026-09-18",
-}
+
+PRICING = get_settings()["pricing"]
 
 _TOKEN_FIELDS = (
     "prompt_tokens", "completion_tokens", "total_tokens",
@@ -51,10 +42,12 @@ def _creation_time(created):
     return timestamp, datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
 
-def _rate_period(date, has_peak):
-    if not has_peak:
+def _rate_period(date, pricing):
+    if "peak" not in pricing:
         return "fixed"
-    peak = date.weekday() < 5 and (1 <= date.hour < 4 or 6 <= date.hour < 10)
+    peak = (date.weekday() in pricing.get("peak_weekdays", PRICING["peak_weekdays"])
+            and any(start <= date.hour < end
+                    for start, end in pricing.get("peak_hours_utc", PRICING["peak_hours_utc"])))
     return "peak" if peak else "off_peak"
 
 
@@ -81,9 +74,7 @@ class UsageLedger:
     def __init__(self, pricing=PRICING):
         if not _valid_rates(pricing) or ("peak" in pricing and not _valid_rates(pricing["peak"])):
             raise ValueError("Token 费率必须是有限的非负数字。")
-        self.pricing = dict(pricing)
-        if "peak" in pricing:
-            self.pricing["peak"] = dict(pricing["peak"])
+        self.pricing = deepcopy(pricing)
         self._records = []
         self._lock = Lock()
 
@@ -94,7 +85,7 @@ class UsageLedger:
 
     def record(self, *, usage=None, model, turn, created=None):
         timestamp, date = _creation_time(created)
-        rate_period = _rate_period(date, "peak" in self.pricing)
+        rate_period = _rate_period(date, self.pricing)
         rates = self.pricing["peak"] if rate_period == "peak" else self.pricing
         record = {
             "turn": turn,
@@ -183,10 +174,14 @@ def format_cost(ledger):
     if any(record["estimated_cache"] and not record["usage_missing"] for record in records):
         lines.append("部分请求的缓存字段缺失或不一致，按输入全部未命中保守估算。")
     if "peak" in pricing:
+        weekdays = "、".join("周" + "一二三四五六日"[day]
+                            for day in pricing.get("peak_weekdays", PRICING["peak_weekdays"]))
+        hours = "、".join(f"{start:02d}:00–{end:02d}:00"
+                         for start, end in pricing.get("peak_hours_utc", PRICING["peak_hours_utc"]))
         lines.extend([
             _format_rates("低谷价", pricing, currency),
             _format_rates("高峰价", pricing["peak"], currency),
-            "高峰时段：UTC 周一至周五 01:00–04:00、06:00–10:00（均不含结束时刻），其余为低谷。",
+            f"高峰时段：UTC {weekdays or '无'} {hours or '无'}（均不含结束时刻），其余为低谷。",
             "按 API 响应创建时间估算费率，缺失时使用本地记录时间；官方未说明跨时段请求的计费时点，跨时段费用可能有差异。",
         ])
     else:

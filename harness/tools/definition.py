@@ -9,7 +9,6 @@ class ToolDefinition:
     name: str
     description: str
     input_schema: dict
-    requires_confirmation: bool = False
     supports_cancellation: bool = False
 
     def to_deepseek(self):

@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from harness.permissions import PermissionPolicy
 from harness.tools.executor import ToolError
 from harness.tools.write_file import DEFINITION, MAX_FILE_BYTES, execute
 
@@ -29,7 +30,7 @@ class WriteFileTests(unittest.TestCase):
         self.assertNotIn("private error details", str(caught.exception))
 
     def test_definition_requires_local_confirmation_and_only_path_and_content(self):
-        self.assertIs(DEFINITION.requires_confirmation, True)
+        self.assertEqual(PermissionPolicy().check(DEFINITION.name), "ask")
         definition = DEFINITION.to_deepseek()
         self.assertEqual(definition["function"]["name"], "write_file")
         schema = definition["function"]["parameters"]

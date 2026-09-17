@@ -7,16 +7,18 @@ import os
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 
+from ..config import get_settings
 from .definition import ToolDefinition
 from .executor import ToolError
 
 
-DEFAULT_MAX_RESULTS = 100
-MAX_RESULTS = 500
-MAX_FILE_BYTES = 1024 * 1024
-MAX_LINE_CHARS = 500
+_SETTINGS = get_settings()["tools"]
+DEFAULT_MAX_RESULTS = _SETTINGS["grep"]["default_max_results"]
+MAX_RESULTS = _SETTINGS["grep"]["max_results"]
+MAX_FILE_BYTES = _SETTINGS["file_max_bytes"]
+MAX_LINE_CHARS = _SETTINGS["grep"]["max_line_chars"]
 # 为跳过统计和最终提示留出余量，避免引擎再把匹配条目拆成 JSON 首尾片段。
-MAX_RESULT_CHARS = 5500
+MAX_RESULT_CHARS = _SETTINGS["grep"]["max_result_chars"]
 
 
 DEFINITION = ToolDefinition(
@@ -25,11 +27,11 @@ DEFINITION = ToolDefinition(
         "在会话启动目录内搜索 UTF-8 文本，keyword 是区分大小写的字面关键词，不是正则表达式。"
         "path 可指定文件或递归搜索的目录，默认当前工作目录；glob 按文件名筛选，如 *.py。"
         "返回 matches，每项包含相对 path、从 1 开始的 line_number 和该行 content。"
-        "max_results 默认 100，最多 500；总结果和超长行也会截断并标记，可缩小 path 或 glob 后重搜。"
+        f"max_results 默认 {DEFAULT_MAX_RESULTS}，最多 {MAX_RESULTS}；总结果和超长行也会截断并标记，可缩小 path 或 glob 后重搜。"
         "关键词本身过长无法在结果中完整保留时，请缩短关键词。"
-        "不读取 .env*、.git、越界路径，不跟随目录软链接。"
-        "跳过不可读、非 UTF-8、二进制、超过 1 MiB 的文件，并报告跳过数量。"
-        "这是只读工具，不需要用户确认。"
+        "不读取 .env*、.git、.harness、越界路径，不跟随目录软链接。"
+        f"跳过不可读、非 UTF-8、二进制、超过 {MAX_FILE_BYTES} 字节的文件，并报告跳过数量。"
+        "这是只读工具，默认权限直接放行。"
     ),
     input_schema={
         "type": "object",
@@ -38,7 +40,7 @@ DEFINITION = ToolDefinition(
             "path": {"type": "string", "minLength": 1, "default": ".", "description": "搜索目录或单个文件，必须在启动目录内；默认 .。"},
             "glob": {"type": "string", "minLength": 1, "default": "*", "description": "不含目录的文件名模式，例如 *.py、*.js，默认 *。"},
             "max_results": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS,
-                            "default": DEFAULT_MAX_RESULTS, "description": "最多返回多少条匹配，默认 100，最大 500。"},
+                            "default": DEFAULT_MAX_RESULTS, "description": f"最多返回多少条匹配，默认 {DEFAULT_MAX_RESULTS}，最大 {MAX_RESULTS}。"},
         },
         "required": ["keyword"],
         "additionalProperties": False,
@@ -169,17 +171,17 @@ def _files(start, is_directory, skipped, abort):
 
 def _checked_path(candidate, root):
     if _protected(candidate):
-        raise ToolError("access_denied", "不允许搜索 .env* 或 .git 路径。")
+        raise ToolError("access_denied", "不允许搜索 .env*、.git 或 .harness 路径。")
     resolved = candidate.resolve()
     if not resolved.is_relative_to(root):
         raise ToolError("access_denied", "只能搜索启动目录及其子目录内的文件。")
     if _protected(resolved):
-        raise ToolError("access_denied", "不允许搜索 .env* 或 .git 路径。")
+        raise ToolError("access_denied", "不允许搜索 .env*、.git 或 .harness 路径。")
     return resolved
 
 
 def _protected(path):
-    return any(part.casefold() == ".git" or part.casefold().startswith(".env") for part in path.parts)
+    return any(part.casefold() in {".git", ".harness"} or part.casefold().startswith(".env") for part in path.parts)
 
 
 def _excerpt(line, keyword):

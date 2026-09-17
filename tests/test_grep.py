@@ -318,7 +318,8 @@ class GrepTests(unittest.TestCase):
             result = self.search()
         self.assert_success(result)
         self.assertEqual([item["path"] for item in result["matches"]], ["visible.py"])
-        self.assertEqual(result["skipped_directories"], 1)
+        # 无权限目录和执行器生成的内部审计目录均须跳过。
+        self.assertEqual(result["skipped_directories"], 2)
         self.assertNotIn("private directory details", json.dumps(result))
 
     def test_read_only_search_never_requests_confirmation(self):

@@ -57,7 +57,7 @@ class ToolTests(unittest.TestCase):
         registry.register(definition, handler)
         arguments = {"value": "参数"}
         with patch("harness.tools.executor.REGISTRY", registry):
-            result = execute_tool(definition.name, arguments, workspace=self.workspace)
+            result = execute_tool(definition.name, arguments, workspace=self.workspace, confirm=lambda *args: True)
         handler.assert_called_once_with(arguments, self.workspace)
         self.assertEqual(result["status"], "success")
         self.assertIs(result["executed"], True)
@@ -80,7 +80,7 @@ class ToolTests(unittest.TestCase):
         registry = ToolRegistry()
         registry.register(ToolDefinition("example", "示例工具。", {"type": "object"}), handler)
         with patch("harness.tools.executor.REGISTRY", registry):
-            result = execute_tool("example", {}, workspace=self.workspace)
+            result = execute_tool("example", {}, workspace=self.workspace, confirm=lambda *args: True)
         self.assert_error(result, "example_error", tool="example")
         self.assertEqual(result["message"], "可修复的错误。")
 
@@ -89,7 +89,7 @@ class ToolTests(unittest.TestCase):
         registry = ToolRegistry()
         registry.register(ToolDefinition("example", "示例工具。", {"type": "object"}), handler)
         with patch("harness.tools.executor.REGISTRY", registry):
-            result = execute_tool("example", {}, workspace=self.workspace)
+            result = execute_tool("example", {}, workspace=self.workspace, confirm=lambda *args: True)
         self.assert_error(result, "execution_error", tool="example")
         self.assertNotIn("private error details", json.dumps(result))
 

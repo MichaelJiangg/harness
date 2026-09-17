@@ -1,14 +1,15 @@
-"""本地确认后，在工作目录内创建或覆盖 UTF-8 文本文件。"""
+"""权限策略允许后，在工作目录内创建或覆盖 UTF-8 文本文件。"""
 
 from pathlib import Path
 from stat import S_IMODE, S_ISREG
 from tempfile import NamedTemporaryFile
 
+from ..config import get_settings
 from .definition import ToolDefinition
 from .executor import ToolError
 
 
-MAX_FILE_BYTES = 1024 * 1024
+MAX_FILE_BYTES = get_settings()["tools"]["file_max_bytes"]
 
 
 DEFINITION = ToolDefinition(
@@ -16,10 +17,12 @@ DEFINITION = ToolDefinition(
     description=(
         "在会话启动目录内创建或覆盖 UTF-8 普通文本文件。"
         "提供 path 和完整 content，已有文件将覆盖全文，缺失的父目录会自动创建。"
-        "每次调用都必须先向用户展示完整内容并取得本地确认，模型不能代替用户批准。"
+        "默认须先向用户展示完整内容及本会话授权目录并取得本地确认；"
+        "匹配本地目录放行规则或已经确认的会话目录时免确认。"
+        "权限由执行器检查，模型不能代替用户批准或修改规则来绕过限制。"
         "用户拒绝时不得自行重试写入，需等待用户新的明确要求。"
         "相对路径以启动目录为基准，绝对路径也必须位于该目录内。"
-        "不允许越界、.env* 或 .git 路径，内容最多 1 MiB。"
+        f"不允许越界、.env*、.git 或 .harness 路径，内容最多 {MAX_FILE_BYTES} 字节。"
         "失败时返回错误代码和说明。"
     ),
     input_schema={
@@ -31,7 +34,6 @@ DEFINITION = ToolDefinition(
         "required": ["path", "content"],
         "additionalProperties": False,
     },
-    requires_confirmation=True,
 )
 
 
@@ -45,17 +47,17 @@ def execute(arguments, workspace):
     try:
         data = arguments["content"].encode("utf-8")
         if len(data) > MAX_FILE_BYTES:
-            raise ToolError("file_too_large", "内容超过 1 MiB 写入上限，请先缩小内容。")
+            raise ToolError("file_too_large", f"内容超过 {MAX_FILE_BYTES} 字节写入上限，请先缩小内容。")
 
         root = Path(workspace).resolve()
         candidate = root / arguments["path"]
         if _protected(candidate):
-            raise ToolError("access_denied", "不允许写入 .env* 或 .git 路径。")
+            raise ToolError("access_denied", "不允许写入 .env*、.git 或 .harness 路径。")
         path = candidate.resolve()
         if not path.is_relative_to(root):
             raise ToolError("access_denied", "只能写入启动目录及其子目录内的文件。")
         if _protected(path):
-            raise ToolError("access_denied", "不允许写入 .env* 或 .git 路径。")
+            raise ToolError("access_denied", "不允许写入 .env*、.git 或 .harness 路径。")
 
         try:
             metadata = path.stat()
@@ -94,4 +96,4 @@ def execute(arguments, workspace):
 
 
 def _protected(path):
-    return any(part.casefold() == ".git" or part.casefold().startswith(".env") for part in path.parts)
+    return any(part.casefold() in {".git", ".harness"} or part.casefold().startswith(".env") for part in path.parts)

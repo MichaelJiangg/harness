@@ -74,6 +74,8 @@ class BashCLITests(unittest.TestCase):
         self.assertIn(f"工作目录：{self.root}", output)
         self.assertIn("超时：30 秒", output)
         self.assertIn("│ " + command.replace("\n", "\n│ "), output)
+        self.assertIn("风险等级：中风险", output)
+        self.assertNotIn("高风险操作警告", output)
         self.assertLess(output.index("printf done > marker.txt"), output.index(CONFIRM_PROMPT))
         self.assertFalse((self.root / "marker.txt").exists())
         client.complete.assert_called_once()
@@ -124,7 +126,28 @@ class BashCLITests(unittest.TestCase):
         session.input.send("n\n")
         self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
         self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 2)
+        self.assertEqual(session.output.getvalue().count("风险等级：中风险"), 2)
+        self.assertNotIn("高风险操作警告", session.output.getvalue())
         self.assertEqual([result["executed"] for result in self.results(client)], [True, False])
+
+    def test_destructive_command_warns_before_preview_and_is_not_executed_when_rejected(self):
+        command = "rm -rf important"
+        with patch("harness.tools.bash.subprocess.Popen") as launch:
+            session, client = self.start([bash_call(command)])
+            self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
+            output = session.output.getvalue()
+            self.assertIn("⚠ 高风险操作警告：可能具有破坏性的终端命令", output)
+            self.assertIn("可能修改或删除文件", output)
+            self.assertIn("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", output)
+            self.assertLess(output.index("高风险操作警告"), output.index("┌── 命令开始"))
+            self.assertLess(output.index("│ " + command), output.index(CONFIRM_PROMPT))
+            client.complete.assert_called_once()
+            launch.assert_not_called()
+            session.input.send("n\n")
+            self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+            session.close()
+            launch.assert_not_called()
+        self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
 
     def test_local_commands_and_invalid_answer_do_not_approve(self):
         session, client = self.start([bash_call("printf changed > marker.txt")])
@@ -151,7 +174,8 @@ class BashCLITests(unittest.TestCase):
         ])
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
         session.close()
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse((self.root / "first.txt").exists())
+        self.assertFalse((self.root / "second.txt").exists())
         self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 1)
         self.assertEqual([result["code"] for result in self.results(client)], ["confirmation_denied"] * 2)
 
@@ -173,7 +197,7 @@ class BashCLITests(unittest.TestCase):
             self.assertTrue(session.input.eof_read.wait(3))
             release.set()
             session.join()
-            self.assertEqual(list(self.root.iterdir()), [])
+            self.assertFalse((self.root / "marker.txt").exists())
             self.assertNotIn(CONFIRM_PROMPT, session.output.getvalue())
             self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
         finally:
@@ -195,7 +219,7 @@ class BashCLITests(unittest.TestCase):
             session.input.send("/exit\n")
             session.join()
             self.assertTrue(finished.is_set())
-            self.assertEqual(list(self.root.iterdir()), [])
+            self.assertFalse((self.root / "marker.txt").exists())
             client.complete.assert_called_once()
 
     def test_non_interactive_mode_rejects_without_prompting(self):
@@ -203,7 +227,7 @@ class BashCLITests(unittest.TestCase):
         self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
         self.assertIn("非交互模式无法确认命令执行", session.output.getvalue())
         self.assertNotIn(CONFIRM_PROMPT, session.output.getvalue())
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse((self.root / "marker.txt").exists())
         self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
 
     def test_exit_allows_running_command_to_clean_up(self):

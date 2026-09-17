@@ -10,6 +10,7 @@ Thumbs.db
 .vscode/
 .codex/
 .claude/
+.harness/
 *.local
 __pycache__/
 *.py[cod]

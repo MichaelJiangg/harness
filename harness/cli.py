@@ -1,19 +1,27 @@
 """终端交互和本地命令；模型请求在后台运行，等待时仍可查看 /cost。"""
 
+import json
 import sys
 from copy import deepcopy
 from pathlib import Path
 from threading import Event, Lock, Thread
 
 from .client import DEFAULT_MODEL
+from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
+from .permissions import SessionPermissionCache, get_risk_level
 from .tools import create_tool_executor
-from .tools.bash import DEFAULT_TIMEOUT
+from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
 from .usage import UsageLedger, format_cost, format_usage
 
-HELP = """输入问题开始查询，可读取启动目录内的 UTF-8 文本文件；写文件和执行终端命令须逐次预览并输入 y 确认。
-确认期间，n 或直接回车拒绝；管道模式不允许写入或执行命令。
-命令默认超时 30 秒，最多 120 秒；以当前用户权限运行，工作目录不是文件访问沙箱。
+HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工具权限由 pyproject.toml 配置。
+默认低风险读取和已识别的只读命令直接放行，中风险操作确认，破坏性命令醒目警告后确认。
+权限规则按禁止优先、数值优先级匹配，首条命中生效；目录授权可免除写入确认。
+写入确认会展示本会话授权目录，批准且写入成功后，同目录及子目录不再询问；重启失效。
+其余需要确认的操作输入 y 批准，Bash 不记忆授权；明确禁止的调用不会执行。
+确认期间，n 或直接回车拒绝；管道模式不允许执行需要确认的工具。
+命令默认超时 {DEFAULT_TIMEOUT} 秒，最多 {MAX_TIMEOUT} 秒；以当前用户权限运行，工作目录不是文件访问沙箱。
+权限决策和确认结果记录到 .harness/permission.log，不记录正文、搜索词或原始命令。
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -21,7 +29,9 @@ HELP = """输入问题开始查询，可读取启动目录内的 UTF-8 文本文
 
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
-            character_delay=0.02):
+            character_delay=None):
+    if character_delay is None:
+        character_delay = get_settings()["display"]["character_delay"]
     ledger = ledger if ledger is not None else UsageLedger()
     input_stream = input_stream if input_stream is not None else sys.stdin
     output = output if output is not None else sys.stdout
@@ -59,9 +69,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     def confirm_tool(name, arguments, workspace):
         nonlocal pending_confirmation
-        if name not in {"write_file", "bash"}:
-            return False
-        label = "写入" if name == "write_file" else "命令执行"
+        label = {"write_file": "写入", "bash": "命令执行"}.get(name, "工具调用")
         if not terminal:
             write(f"[确认] 非交互模式无法确认{label}，已拒绝本次操作。")
             return False
@@ -70,6 +78,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             with confirmation_lock:
                 if input_closed or abort.is_set():
                     return False
+                risk = _confirmation_risk(name, arguments)
                 if name == "write_file":
                     candidate = Path(workspace) / arguments["path"]
                     path = candidate.resolve()
@@ -77,17 +86,26 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     action = "覆盖已有文件的全部内容" if existed else "新建文件（确认后创建缺失的父目录）"
                     content = "\n".join("│ " + line for line in _preview_text(arguments["content"]).split("\n"))
                     preview = (
-                        f"\n[写入确认] {name}\n目标路径：{_preview_text(str(path), multiline=False)}\n"
+                        f"\n[写入确认] {name}\n{risk}\n目标路径：{_preview_text(str(path), multiline=False)}\n"
                         f"操作：{action}\n完整内容（控制字符转义显示，换行和制表符保留）：\n"
                         f"┌── 文件内容开始 ──\n{content}\n└── 文件内容结束 ──\n"
+                        f"本会话授权目录：{_preview_text(str(path.parent), multiline=False)}（含子目录）\n"
+                        "输入 y 将批准本次写入；写入成功后记住以上目录，当前会话内复用，重启失效。\n"
                     )
-                else:
+                elif name == "bash":
                     command = "\n".join("│ " + line for line in _preview_text(arguments["command"]).split("\n"))
                     preview = (
-                        f"\n[命令确认] {name}\n工作目录：{_preview_text(str(workspace), multiline=False)}\n"
+                        f"\n{risk}\n[命令确认] {name}\n工作目录：{_preview_text(str(workspace), multiline=False)}\n"
                         f"超时：{arguments.get('timeout', DEFAULT_TIMEOUT)} 秒\n"
                         "完整命令（控制字符转义显示，换行和制表符保留）：\n"
                         f"┌── 命令开始 ──\n{command}\n└── 命令结束 ──\n"
+                    )
+                else:
+                    parameters = _preview_text(json.dumps(arguments, ensure_ascii=False, indent=2))
+                    preview = (
+                        f"\n[工具确认] {_preview_text(name, multiline=False)}\n{risk}\n"
+                        f"工作目录：{_preview_text(str(workspace), multiline=False)}\n"
+                        f"完整参数：\n{parameters}\n"
                     )
                 pending_confirmation = request
                 write(
@@ -130,7 +148,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if request is not None:
                 request["done"].set()
 
-    tool_executor = create_tool_executor(confirm=confirm_tool, abort=abort)
+    tool_executor = create_tool_executor(confirm=confirm_tool, abort=abort, session_cache=SessionPermissionCache())
 
     def on_event(event):
         nonlocal stream_line_open, response_streamed
@@ -241,6 +259,26 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if worker:
             worker.join(timeout=1)
         write("\n查询已停止。")
+
+
+def _confirmation_risk(name, arguments):
+    """提示与权限引擎使用同一份风险分类。"""
+    risk = get_risk_level(name, arguments)
+    if risk == "high":
+        return (
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            "⚠ 高风险操作警告：可能具有破坏性的终端命令\n"
+            "命令可能修改或删除文件、执行其他程序或发起网络请求。\n"
+            "将以当前用户权限运行，请核对下方完整命令和影响范围。\n"
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+    if risk == "low":
+        return "风险等级：低风险（只读；当前权限规则要求确认）。"
+    if name == "write_file":
+        return "风险等级：中风险（写入文件）。"
+    if name == "bash":
+        return "风险等级：中风险（可能修改文件、环境或执行程序；请核对完整命令）。"
+    return "风险等级：中风险（工具调用，执行前需要确认）。"
 
 
 def _preview_text(text, *, multiline=True):

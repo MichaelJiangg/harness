@@ -1,4 +1,4 @@
-"""经本地确认执行有限时的 bash 命令，分别限量收集两路输出。"""
+"""按权限策略执行有限时的 bash 命令，分别限量收集两路输出。"""
 
 import os
 from pathlib import Path
@@ -8,13 +8,16 @@ import subprocess
 import sys
 from time import monotonic
 
+from ..bash_risk import classify_bash_risk
+from ..config import get_settings
 from .definition import ToolDefinition
 from .executor import ToolError
 
 
-DEFAULT_TIMEOUT = 30
-MAX_TIMEOUT = 120
-MAX_OUTPUT_BYTES = 64 * 1024
+_SETTINGS = get_settings()["tools"]["bash"]
+DEFAULT_TIMEOUT = _SETTINGS["default_timeout"]
+MAX_TIMEOUT = _SETTINGS["max_timeout"]
+MAX_OUTPUT_BYTES = _SETTINGS["max_output_bytes"]
 _TRUNCATION_MARKER = b"\n... [output truncated] ...\n"
 _CLEANUP_TIMEOUT = 0.4
 
@@ -23,13 +26,14 @@ DEFINITION = ToolDefinition(
     name="bash",
     description=(
         "从会话启动目录执行 bash 命令，支持管道和重定向。"
-        "每次执行前必须由用户在本地确认完整命令，模型不能代替用户批准。"
+        "明确识别的简单只读命令可直接执行；其他命令须由用户在本地确认完整命令，"
+        "破坏性命令显示高风险警告，模型不能代替用户批准。"
         "用户拒绝后不得自行重试，需等待用户新的明确要求。"
         "命令以当前用户权限运行，工作目录不是文件访问沙箱。"
         "仅支持 macOS／Linux，标准输入关闭，不支持交互式程序或持久后台作业。"
-        "timeout 默认 30 秒，最多 120 秒，超时会终止同组进程。"
+        f"timeout 默认 {DEFAULT_TIMEOUT} 秒，最多 {MAX_TIMEOUT} 秒，超时会终止同组进程。"
         "返回 stdout、stderr、exit_code、timed_out 和 cancelled；"
-        "每路输出最多保留 64 KiB，超限保留首尾并标记。"
+        f"每路输出最多保留 {MAX_OUTPUT_BYTES} 字节，超限保留首尾并标记。"
     ),
     input_schema={
         "type": "object",
@@ -37,13 +41,12 @@ DEFINITION = ToolDefinition(
             "command": {"type": "string", "minLength": 1, "description": "待执行的完整 bash 命令。"},
             "timeout": {
                 "type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT,
-                "default": DEFAULT_TIMEOUT, "description": "命令超时秒数，范围 1～120。",
+                "default": DEFAULT_TIMEOUT, "description": f"命令超时秒数，范围 1～{MAX_TIMEOUT}。",
             },
         },
         "required": ["command"],
         "additionalProperties": False,
     },
-    requires_confirmation=True,
     supports_cancellation=True,
 )
 
@@ -54,15 +57,24 @@ def execute(arguments, workspace, *, abort=None):
     if not command.strip() or "\x00" in command:
         raise ToolError("invalid_arguments", "command 必须是非空命令，且不能含空字符。")
     if type(timeout) is not int or not 1 <= timeout <= MAX_TIMEOUT:
-        raise ToolError("invalid_arguments", "timeout 必须是 1～120 之间的整数。")
+        raise ToolError("invalid_arguments", f"timeout 必须是 1～{MAX_TIMEOUT} 之间的整数。")
     if sys.platform != "darwin" and not sys.platform.startswith("linux"):
         raise ToolError("unsupported_platform", "bash 工具当前仅支持 macOS／Linux。")
     if abort is not None and abort.is_set():
         raise ToolError("execution_cancelled", "命令已取消，未执行。")
 
-    environment = os.environ.copy()
-    for name in ("DEEPSEEK_API_KEY", "BASH_ENV", "ENV"):
-        environment.pop(name, None)
+    if classify_bash_risk(command) == "read_only":
+        # A whitelisted command must not resolve to a user-defined program/function.
+        environment = {key: os.environ[key] for key in (
+            "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ",
+        ) if key in os.environ}
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    else:
+        environment = {
+            key: value for key, value in os.environ.items()
+            if key not in {"DEEPSEEK_API_KEY", "BASH_ENV", "ENV"}
+            and not key.startswith(("BASH_FUNC_", "LD_", "DYLD_"))
+        }
     try:
         process = subprocess.Popen(
             ["/bin/bash", "--noprofile", "--norc", "-c", command],

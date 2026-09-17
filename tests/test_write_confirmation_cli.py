@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 
 from harness.cli import HELP
 from harness.engine import query_loop
+from harness.permissions import PermissionPolicy
+from harness.tools import create_tool_executor
 from test_cli import CLISession, QueuedInput, reply
 
 
@@ -29,7 +31,12 @@ class WriteConfirmationCLITests(unittest.TestCase):
         cwd.start()
         self.addCleanup(cwd.stop)
 
-    def start(self, calls, *, terminal=True):
+    def start(self, calls, *, terminal=True, policy=None):
+        if policy is not None:
+            factory = patch("harness.cli.create_tool_executor", side_effect=lambda **kwargs:
+                            create_tool_executor(permissions=policy, **kwargs))
+            factory.start()
+            self.addCleanup(factory.stop)
         client = Mock(complete=Mock(side_effect=[reply(None, tool_calls=calls), reply("写入请求处理完毕。")]))
         session = CLISession(client, lines=("请写入文件\n",), terminal=terminal, character_delay=0)
         self.addCleanup(session.close)
@@ -47,6 +54,10 @@ class WriteConfirmationCLITests(unittest.TestCase):
         output = session.output.getvalue()
         self.assertIn(str(self.root / "new/nested/note.txt"), output)
         self.assertIn("操作：新建文件", output)
+        self.assertIn("风险等级：中风险（写入文件）", output)
+        self.assertIn(f"本会话授权目录：{self.root / 'new/nested'}（含子目录）", output)
+        self.assertIn("写入成功后记住以上目录，当前会话内复用，重启失效", output)
+        self.assertNotIn("高风险操作警告", output)
         self.assertIn(content, output)
         self.assertLess(output.index("尾部"), output.index(CONFIRM_PROMPT))
         self.assertFalse((self.root / "new").exists())
@@ -117,15 +128,15 @@ class WriteConfirmationCLITests(unittest.TestCase):
         self.assertFalse((self.root / "absent").exists())
         self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
 
-    def test_each_tool_call_requires_a_separate_confirmation(self):
+    def test_writes_in_separate_directories_require_separate_confirmations(self):
         session, client = self.start([
-            write_call("first.txt", "第一次"),
+            write_call("first/first.txt", "第一次"),
             write_call("second/second.txt", "第二次", "write_2"),
         ])
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
         session.input.send("y\n")
         self.assertTrue(session.output.wait_for("│ 第二次"))
-        self.assertEqual((self.root / "first.txt").read_text(encoding="utf-8"), "第一次")
+        self.assertEqual((self.root / "first/first.txt").read_text(encoding="utf-8"), "第一次")
         self.assertFalse((self.root / "second").exists())
         client.complete.assert_called_once()
         session.input.send("n\n")
@@ -133,6 +144,54 @@ class WriteConfirmationCLITests(unittest.TestCase):
         self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 2)
         self.assertEqual([result["executed"] for result in self.results(client)], [True, False])
         self.assertFalse((self.root / "second").exists())
+
+    def test_successful_write_remembers_directory_and_subdirectories_for_this_session(self):
+        session, client = self.start([
+            write_call("src/first.py", "first"),
+            write_call("src/second.py", "second", "write_2"),
+            write_call("src/nested/third.py", "third", "write_3"),
+        ])
+        self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
+        self.assertFalse((self.root / "src").exists())
+        session.input.send("y\n")
+        self.assertTrue(session.output.wait_for("DeepSeek > 写入请求处理完毕。"))
+        self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 1)
+        self.assertEqual([result["executed"] for result in self.results(client)], [True] * 3)
+        for name, content in (("first.py", "first"), ("second.py", "second"), ("nested/third.py", "third")):
+            self.assertEqual((self.root / "src" / name).read_text(encoding="utf-8"), content)
+
+    def test_new_cli_session_requires_confirmation_for_previously_approved_directory(self):
+        first, _ = self.start([write_call("src/first.py", "first")])
+        self.assertTrue(first.output.wait_for(CONFIRM_PROMPT))
+        first.input.send("y\n")
+        self.assertTrue(first.output.wait_for("DeepSeek > 写入请求处理完毕。"))
+        first.close()
+        second, client = self.start([write_call("src/second.py", "second")])
+        self.assertTrue(second.output.wait_for(CONFIRM_PROMPT))
+        self.assertFalse((self.root / "src/second.py").exists())
+        second.input.send("n\n")
+        self.assertTrue(second.output.wait_for("DeepSeek > 写入请求处理完毕。"))
+        self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
+        self.assertFalse((self.root / "src/second.py").exists())
+
+    def test_deny_rule_wins_over_remembered_directory(self):
+        policy = PermissionPolicy(rules=[{
+            "tool": "write_file", "action": "deny", "directory": "src/restricted",
+        }])
+        session, client = self.start([
+            write_call("src/first.py", "first"),
+            write_call("src/restricted/secret.py", "blocked", "write_2"),
+        ], policy=policy)
+        self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
+        session.input.send("y\n")
+        self.assertTrue(session.output.wait_for("DeepSeek > 写入请求处理完毕。"))
+        self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 1)
+        self.assertEqual((self.root / "src/first.py").read_text(encoding="utf-8"), "first")
+        self.assertFalse((self.root / "src/restricted").exists())
+        results = self.results(client)
+        self.assertTrue(results[0]["executed"])
+        self.assertEqual(results[1]["code"], "permission_denied")
+        self.assertFalse(results[1]["executed"])
 
     def test_local_commands_and_invalid_answer_do_not_approve_or_reach_model(self):
         session, client = self.start([write_call("result.txt", "等待确认")])
@@ -159,7 +218,8 @@ class WriteConfirmationCLITests(unittest.TestCase):
         ])
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
         session.close()
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse((self.root / "first").exists())
+        self.assertFalse((self.root / "second").exists())
         self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 1)
         self.assertEqual([result["code"] for result in self.results(client)], ["confirmation_denied"] * 2)
 
@@ -181,7 +241,7 @@ class WriteConfirmationCLITests(unittest.TestCase):
             self.assertTrue(session.input.eof_read.wait(3))
             release.set()
             session.join()
-            self.assertEqual(list(self.root.iterdir()), [])
+            self.assertFalse((self.root / "late").exists())
             self.assertNotIn(CONFIRM_PROMPT, session.output.getvalue())
             self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
         finally:
@@ -203,7 +263,7 @@ class WriteConfirmationCLITests(unittest.TestCase):
             session.input.send("/exit\n")
             session.join()
             self.assertTrue(finished.wait(3))
-            self.assertEqual(list(self.root.iterdir()), [])
+            self.assertFalse((self.root / "exit").exists())
             client.complete.assert_called_once()
 
     def test_keyboard_interrupt_wakes_pending_confirmation(self):
@@ -228,7 +288,7 @@ class WriteConfirmationCLITests(unittest.TestCase):
             session.input.send("interrupt\n")
             session.join()
             self.assertTrue(finished.wait(3))
-            self.assertEqual(list(self.root.iterdir()), [])
+            self.assertFalse((self.root / "interrupt").exists())
             self.assertIn("查询已停止", session.output.getvalue())
             client.complete.assert_called_once()
 
@@ -237,7 +297,7 @@ class WriteConfirmationCLITests(unittest.TestCase):
         self.assertTrue(session.output.wait_for("DeepSeek > 写入请求处理完毕。"))
         self.assertIn("非交互模式无法确认写入", session.output.getvalue())
         self.assertNotIn(CONFIRM_PROMPT, session.output.getvalue())
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse((self.root / "pipe").exists())
         self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
 
     def test_terminal_control_sequences_are_visible_and_do_not_change_written_content(self):
