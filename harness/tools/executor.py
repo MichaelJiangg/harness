@@ -107,7 +107,8 @@ def execute_tool(name, arguments, *, workspace=None, confirm=None, abort=None, p
                         "allow", result.risk, "session:run_verify_directory",
                         "本会话已授权该目录验证。",
                     )
-                if name == "run_verify" and result.decision == "allow":
+                if (name == "run_verify" and result.decision == "allow"
+                        and result.matched_rule != "session:auto"):
                     return PermissionDecision(
                         "ask", result.risk, "verification:confirm",
                         "验证脚本可能执行任意本地代码，仍须用户确认。",

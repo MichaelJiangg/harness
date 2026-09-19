@@ -87,13 +87,16 @@ def bash_auto_allowed(command, workspace, auto_directories=()):
     """Auto 模式只排除明确危险，不假装能理解任意 Shell 语义。"""
     if not isinstance(command, str) or not command.strip():
         return False
+    command = command.replace("$(pwd)", ".")
     if classify_bash_risk(command) == "destructive":
         return False
     if _SENSITIVE.search(command) or _AUTO_DANGEROUS.search(command):
         return False
     if ".." in command or "$(" in command or "`" in command:
         return False
-    inspection = re.sub(r"\b2\s*>\s*/dev/null\b", "", command)
+    inspection = re.sub(r"\b2\s*>\s*(?:/dev/null|&1)\b", "", command)
+    if "<<" in inspection:
+        inspection = inspection.replace("<<", "", 1)
     if any(character in inspection for character in "<>"):
         return False
     try:
@@ -103,7 +106,7 @@ def bash_auto_allowed(command, workspace, auto_directories=()):
         tokens = list(lexer)
     except ValueError:
         return False
-    if not tokens or any(char in command for char in "(){}"):
+    if not tokens:
         return False
 
     root = Path(workspace).resolve()
@@ -112,9 +115,9 @@ def bash_auto_allowed(command, workspace, auto_directories=()):
     ]
     parts = [[]]
     for token in tokens:
-        if token in {"&&", ";", "||"}:
+        if token in {"&&", ";", "||", "|"}:
             parts.append([])
-        elif token in {"&", "|"}:
+        elif token == "&":
             return False
         else:
             parts[-1].append(token)

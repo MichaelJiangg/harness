@@ -39,6 +39,14 @@ class PermissionPolicyTests(unittest.TestCase):
                                             workspace=root).matched_rule, "session:auto")
             self.assertEqual(policy.evaluate("bash", {"command": "node --test tests/"},
                                             workspace=root).matched_rule, "session:auto")
+            self.assertEqual(policy.evaluate(
+                "bash", {"command": "node --test tests/ 2>&1 | tail -20"},
+                workspace=root,
+            ).matched_rule, "session:auto")
+            self.assertEqual(policy.evaluate(
+                "bash", {"command": "cd \"$(pwd)\" && python3 - <<'PY'\nprint('ok')\nPY"},
+                workspace=root,
+            ).matched_rule, "session:auto")
 
     def test_auto_mode_keeps_dangerous_and_outside_operations_protected(self):
         with TemporaryDirectory() as directory:

@@ -48,6 +48,17 @@ class RunVerifyTests(unittest.TestCase):
         self.assertIn("node-ok", result["stdout"])
         confirm.assert_called_once()
 
+    def test_auto_mode_runs_verification_without_confirmation(self):
+        confirm = Mock(side_effect=AssertionError("auto 模式不应要求确认。"))
+        executor = create_tool_executor(
+            self.root, confirm=confirm,
+            permissions=PermissionPolicy(mode="auto"),
+        )
+        result = executor("run_verify", {
+            "target": "check.js", "runner": "node", "timeout": 2,
+        })
+        self.assertEqual(result["status"], "success")
+
         confirm = Mock(return_value=False)
         denied = create_tool_executor(
             self.root, confirm=confirm,
