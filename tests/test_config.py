@@ -93,7 +93,11 @@ class ConfigTests(unittest.TestCase):
                         self.assertEqual(entrypoint.main(), 0)
         load.assert_called_once_with()
         client.assert_called_once_with("test-value")
-        run_cli.assert_called_once_with(client.return_value)
+        run_cli.assert_called_once_with(
+            client.return_value,
+            memory_enabled=True,
+            notes_enabled=True,
+        )
 
 
 if __name__ == "__main__":

@@ -138,8 +138,18 @@ def execute_tool(name, arguments, *, workspace=None, confirm=None, abort=None, p
                 record(PermissionDecision("deny", "unknown", "error:path_check", "路径检查失败。"))
                 raise ToolError("permission_check_failed", "无法解析验证目标，未执行工具。") from None
 
+        def notes_target():
+            if name not in {"notes_append", "notes_replace"}:
+                return None
+            try:
+                return (root / "HARNESS.md").resolve()
+            except (OSError, RuntimeError, ValueError):
+                record(PermissionDecision("deny", "unknown", "error:path_check", "路径检查失败。"))
+                raise ToolError("permission_check_failed", "无法解析项目笔记目标，未执行工具。") from None
+
         initial_target = file_target()
         initial_verification_target = verification_target()
+        initial_notes_target = notes_target()
         decision = check_permissions()
         if decision.matched_rule in {"session:write_directory", "session:run_verify_directory"}:
             confirmation = "remembered"
@@ -187,7 +197,8 @@ def execute_tool(name, arguments, *, workspace=None, confirm=None, abort=None, p
             record(current, event="guard_denial")
             return error("permission_denied", current.reason)
         if (current != decision or file_target() != initial_target
-                or verification_target() != initial_verification_target):
+                or verification_target() != initial_verification_target
+                or notes_target() != initial_notes_target):
             record(PermissionDecision("deny", current.risk, "guard:target_changed", "权限或目标发生变化。"),
                    event="guard_denial")
             return error("permission_changed", "路径对应的权限条件已变化，未执行工具；请重新发起调用。")

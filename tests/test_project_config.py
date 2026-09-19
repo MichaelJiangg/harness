@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.5.1")
+        self.assertEqual(project["version"], "0.6.0")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], [])
         self.assertEqual(project["readme"], "README.md")
@@ -69,7 +69,8 @@ class ProjectConfigTests(unittest.TestCase):
                      "max_line_chars": 500, "max_result_chars": 5500},
         })
         self.assertEqual(settings["permissions"], {
-            "allow": ["read_file", "grep", "delegate"], "ask": ["write_file"], "deny": [], "rules": [],
+            "allow": ["read_file", "grep", "delegate", "notes_append"],
+            "ask": ["write_file", "notes_replace"], "deny": [], "rules": [],
         })
 
     def test_initial_rates_and_peak_periods_are_preserved(self):

@@ -46,17 +46,21 @@ class ToolRegistryTests(unittest.TestCase):
         background_submit_tool, _ = REGISTRY.get("background_submit")
         swarm_tool, _ = REGISTRY.get("swarm")
         run_verify_tool, _ = REGISTRY.get("run_verify")
+        notes_append_tool, _ = REGISTRY.get("notes_append")
+        notes_read_tool, _ = REGISTRY.get("notes_read")
+        notes_replace_tool, _ = REGISTRY.get("notes_replace")
         self.assertEqual(descriptions, [
             background_check_tool.to_deepseek(), background_submit_tool.to_deepseek(),
             bash_tool.to_deepseek(), delegate_tool.to_deepseek(), search_tool.to_deepseek(),
-            tool.to_deepseek(), run_verify_tool.to_deepseek(), swarm_tool.to_deepseek(),
-            write_tool.to_deepseek(),
+            notes_append_tool.to_deepseek(), notes_read_tool.to_deepseek(),
+            notes_replace_tool.to_deepseek(), tool.to_deepseek(),
+            run_verify_tool.to_deepseek(), swarm_tool.to_deepseek(), write_tool.to_deepseek(),
         ])
         self.assertNotIn("requires_confirmation", json.dumps(descriptions))
         self.assertNotIn("supports_cancellation", json.dumps(descriptions))
         json.dumps(descriptions)
-        descriptions[5]["function"]["parameters"]["properties"].clear()
-        self.assertIn("path", get_tool_definitions()[5]["function"]["parameters"]["properties"])
+        descriptions[8]["function"]["parameters"]["properties"].clear()
+        self.assertIn("path", get_tool_definitions()[8]["function"]["parameters"]["properties"])
         self.assertIn("path", tool.input_schema["properties"])
 
     def test_register_maps_name_to_definition_and_handler_and_rejects_duplicates(self):

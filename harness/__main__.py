@@ -13,7 +13,11 @@ def main():
         if "--help" in sys.argv[1:]:
             print(f"在项目 .env 中填写 DEEPSEEK_API_KEY 后运行 python3 -m harness。\n\n{HELP}")
             return 0
-        run_cli(DeepSeekClient(load_api_key()))
+        run_cli(
+            DeepSeekClient(load_api_key()),
+            memory_enabled=True,
+            notes_enabled=True,
+        )
     except ValueError as error:
         print(f"错误：{error}", file=sys.stderr)
         return 1

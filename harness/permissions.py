@@ -20,7 +20,7 @@ DEFAULT_POLICY = {"low": "allow", "medium": "ask", "high": "ask"}
 
 def get_risk_level(tool_name, params=None):
     """评估操作本身的风险，不在这里判断规则或询问用户。"""
-    if tool_name in {"read_file", "grep"}:
+    if tool_name in {"read_file", "grep", "notes_read"}:
         return "low"
     if tool_name == "background_check":
         return "low"

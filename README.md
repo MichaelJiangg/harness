@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+，仅使用标准库，零第三方运行依赖。
 
-最近发布：**V0.5.1 — Add-Auto 模式**（Git 标签 `v0.5.1`）。在 V0.5 Agent 编排基础上增加 `ask`／`auto` 权限模式，减少团队开发中的重复确认。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.6 — Add-记忆系统**（Git 标签 `v0.6`）。在 Agent 编排、Auto 权限模式基础上增加跨会话记忆和 `HARNESS.md` 项目长期笔记。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -44,10 +44,50 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `/cost` | 查询本次会话用量、USD 预估费用和逐请求明细，不调用模型；等待回答时也可使用 |
 | `/compact` | 空闲时让模型总结旧对话，保留最近几轮；摘要请求计入 `/cost` |
 | `/mode ask|auto [目录]` | 切换权限模式；auto 模式信任当前或指定工作目录 |
+| `/memory [list\|show <id>\|delete <id> --yes\|clear --yes]` | 查看和管理本地会话记忆 |
+| `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
 | `/help` | 查看帮助 |
 | `/exit` | 退出，停止后续模型和工具调用 |
 
 `python3 -m harness --help` 无需密钥即可查看帮助。支持单条管道输入，输入流结束后会等待回答；交互中一次处理一个问题，繁忙时的新问题会被提示稍后重发。
+
+## 会话记忆
+
+正常通过 `/exit` 或输入结束退出时，Harness 会调用 DeepSeek 把本次对话压缩成一条摘要，保存到当前工作区的 `.harness/memory.json`。下次启动时自动加载最近 5 条摘要，作为背景注入系统提示，模型据此回答“上次讨论了什么”之类的问题。
+
+每条记录包含数字编号、UTC 日期、摘要和话题标签。摘要最多 1000 字，文件最多保留 20 条记录；文件采用 JSON 格式，权限为 `0600`，通过同目录临时文件原子替换，损坏时不会阻止 CLI 启动。摘要请求只提交用户和助手文字以及工具名称，不提交工具结果正文，避免把文件或命令输出写入记忆。
+
+```text
+你 > /memory
+[1] 2026-09-20 — 技术选型：FastAPI + PostgreSQL
+    话题：技术选型、FastAPI、PostgreSQL
+
+你 > /memory delete 1 --yes
+已删除记忆 #1。
+```
+
+`delete` 和 `clear` 必须显式带 `--yes`。`python3 -m harness` 默认启用记忆；直接调用 `run_cli` 的嵌入场景默认关闭，避免第三方程序在退出时产生额外的模型请求。
+
+记忆是本地明文 JSON，不是加密或防篡改存储；拥有当前用户权限的 Bash 命令仍可访问该文件。
+
+## 项目笔记
+
+项目根目录的 `HARNESS.md` 保存长期有效的项目知识，包括技术栈、编码约定、架构决定、已知问题和当前进展。CLI 启动时自动读取并注入系统提示，因此下个会话可以直接引用其中的规范。
+
+AI 收到「记住：我们的 API 前缀统一用 /api/v2」这类明确要求，或在对话中发现值得长期保留的项目决定时，会调用 `notes_append` 追加 Markdown 内容。用户也可以在终端直接管理：
+
+```text
+你 > /notes
+HARNESS.md：
+# 编码规范
+- 格式化工具：Black，行宽 88
+- Lint 工具：ruff
+
+你 > /notes append - 后端：FastAPI
+已追加项目笔记（24 字节）。
+```
+
+`/notes replace --yes <text>` 替换整个文件，`/notes clear --yes` 清空文件。笔记固定指向会话工作区根目录的 `HARNESS.md`，不接收其他路径；文件最多 65536 字节，拒绝软链接、目录和二进制内容。普通追加默认放行，整篇替换需要用户确认，`deny` 规则仍可禁止。
 
 ## 项目配置
 
@@ -87,8 +127,8 @@ API key 继续放在 `.env` 或环境变量中，不能迁入 `pyproject.toml`�
 
 ```toml
 [tool.harness.permissions]
-allow = ["read_file", "grep"]
-ask = ["write_file"]
+allow = ["read_file", "grep", "delegate", "notes_append"]
+ask = ["write_file", "notes_replace"]
 deny = []
 rules = []
 ```
@@ -435,6 +475,8 @@ V0.5 提供三种编排方式：
 | `harness/engine.py` | 查询循环、有限重试、摘要压缩与逐次记账 |
 | `harness/orchestration.py` | 独立委托、后台分析和 Swarm 角色编排 |
 | `harness/background.py` | 后台任务状态、排队、并发限制与超时 |
+| `harness/memory/` | 本地 JSON 记忆、启动注入、退出摘要和记忆命令；`session.py` 保存核心，`injection.py` 负责上下文注入 |
+| `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
 | `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |
 | `harness/tools/registry.py` | 自动发现、注册和查找工具，生成描述列表 |
@@ -448,6 +490,9 @@ V0.5 提供三种编排方式：
 | `harness/tools/background_check.py` | 后台任务状态与结果查询 |
 | `harness/tools/run_verify.py` | 工作区内 Node／Python 验证脚本运行入口 |
 | `harness/tools/swarm.py` | 多角色团队协作 Schema 与默认团队 |
+| `harness/tools/notes_read.py` | 读取 HARNESS.md 项目长期笔记 |
+| `harness/tools/notes_append.py` | 向 HARNESS.md 追加长期知识 |
+| `harness/tools/notes_replace.py` | 替换 HARNESS.md 全部内容 |
 | `harness/usage.py` | 逐请求 token 记录、模型费率与费用汇总 |
 | `harness/cli.py` | 终端输入、回答和斜杠命令 |
 | `tests/` | 模拟接口、工具、计费与 CLI 测试 |
@@ -463,5 +508,9 @@ python3 -m unittest discover -s tests -v
 V0.4 权限离线测试通过，覆盖规则冲突与路径边界、五类 Bash 风险信号、环境清理、会话授权复用与隔离、禁止优先、拒绝说明，以及审计脱敏、特殊文件拒绝和日志故障时阻止执行。
 
 V0.5 Agent 编排离线测试通过，覆盖独立预算、后台生命周期、Swarm 交接和受限验证目录授权。
+
+本地记忆测试通过，覆盖 JSON 持久化、最近摘要加载、删除与清空确认、退出摘要、工具结果隔离和嵌入调用默认关闭。
+
+项目笔记测试通过，覆盖 Markdown 持久化、启动注入、自动追加、整篇替换确认、路径保护和 CLI 管理。
 
 官方依据：[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 。

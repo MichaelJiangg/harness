@@ -1,5 +1,19 @@
 # 版本记录
 
+## V0.6 — Add-记忆系统
+
+Git 标签：`v0.6`。
+
+- 新增本地会话记忆：`python3 -m harness` 正常退出时调用 DeepSeek 提取用户／助手对话中的决定、约束、关键事实、产出和待办，保存为 `.harness/memory.json` 中的一条 JSON 摘要。
+- 下次 CLI 启动时自动加载最近 5 条摘要，作为背景上下文注入系统提示；记忆内容只作为项目背景，不替代当前用户指令。
+- 新增 `/memory list`、`/memory show <id>`、`/memory delete <id> --yes`、`/memory clear --yes`，本地查看和管理记忆，不调用模型。
+- 记忆文件位于当前工作区的 `.harness/`，保持最多 20 条记录和 0600 权限，采用同目录临时文件原子替换；损坏时跳过加载但继续运行。
+- 摘要请求只提交用户／助手文字和工具名称，不包含工具结果正文；模型摘要失败时使用最近文字降级保存，请求失败仍按现有账本规则记录。
+- 新增记忆存储、启动注入、退出摘要和 CLI 管理回归，全部 534 项离线测试通过；未进行真实 DeepSeek API 联调。
+- 新增 `HARNESS.md` 项目长期笔记：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换项目知识。
+- `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；固定工作区根目录单文件，最多 65536 字节，拒绝软链接、目录和二进制内容。
+- `notes_append` 默认自动放行，`notes_replace` 默认逐次确认，`deny` 规则始终优先；记忆核心按 `harness/memory/session.py` 与 `harness/memory/injection.py` 拆分，新增笔记存储、工具注册、模型自动记忆、权限和 CLI 回归，全部 547 项离线测试通过；未进行真实 DeepSeek API 联调。
+
 ## V0.5 — Add-Agent 编排
 
 Git 标签：`v0.5`。

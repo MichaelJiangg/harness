@@ -39,6 +39,11 @@
 - CLI 对 Swarm 角色内部工具、请求用量、压缩和重试事件默认静默，只显示角色开始、完成、交接和团队结果。
 - 任何包含 `bash` 的 Swarm 角色自动获得 `run_verify`，角色提示优先使用它运行已有测试，减少重复 Bash 确认。
 - CLI 显示 `[swarm] 角色分配`、角色开始／完成、交接目标和团队完成／失败；角色回答流不直接混入主输出，用量和工具事件带 `[swarm]` 标识。
+- `harness/memory/session.py` 管理当前工作区的 `.harness/memory.json`：正常 `/exit` 或输入结束时调用 DeepSeek 提取本次会话摘要并保存，摘要请求只包含用户／助手文字和工具名称，不包含工具结果正文。`/memory list|show|delete --yes|clear --yes` 只管理本地 JSON，不调用模型；记忆文件损坏时跳过加载但继续运行。
+- `harness/memory/injection.py` 负责把最近 5 条摘要整理为系统提示背景；`harness/memory/__init__.py` 保持公共接口，CLI 和测试不需要按内部文件导入。
+- 记忆默认只在 `python3 -m harness` 的 CLI 启动入口启用，`run_cli` 嵌入调用默认保持关闭，避免测试或第三方嵌入在退出时产生意外的模型请求。
+- `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
+- `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
 - `tests/`：使用 `unittest` 验证行为，默认不访问真实 DeepSeek API。
 - `README.md`：启动方法、配置、行为和限制。
 - `ROADMAP.md`：当前阶段、完成项、待办、阻塞和最近验证。

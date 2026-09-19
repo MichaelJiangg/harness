@@ -376,7 +376,7 @@ class DelegateIntegrationTests(unittest.TestCase):
             reply(second_summary),
             reply("第二次压缩后完成比较。"),
             reply("主任务整理完成。"),
-        ], tools=tools, context_limit=6000, summary_limit=1600, max_compactions=2)
+        ], tools=tools, context_limit=6200, summary_limit=1600, max_compactions=2)
         with patch("harness.engine.compact_history", wraps=compact_history) as compact:
             self.assertEqual(query_loop(state), "主任务整理完成。")
         requests = state.client.requests

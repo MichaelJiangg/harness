@@ -1,6 +1,7 @@
 """终端交互和本地命令；模型请求在后台运行，等待时仍可查看 /cost。"""
 
 import json
+import shlex
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -10,6 +11,10 @@ from .background import BackgroundManager, COMPLETED
 from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
+from .memory import (
+    MemoryStore, format_record, has_memory_candidates, memory_system_prompt, summarize_session,
+)
+from .notes import NotesStore, notes_system_prompt
 from .permissions import PermissionPolicy, SessionPermissionCache, get_risk_level
 from .tools import create_tool_executor
 from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
@@ -29,6 +34,8 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 多角色接力任务可通过 swarm 启动团队协作，角色拥有独立上下文并按交接协议传递成果。
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
 /mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
+/memory [list|show <id>|delete <id> --yes|clear --yes]  查看和管理本地会话记忆
+/notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -36,7 +43,8 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
-            character_delay=None):
+            character_delay=None, memory_enabled=False, memory_store=None,
+            notes_enabled=False, notes_store=None):
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
     ledger = ledger if ledger is not None else UsageLedger()
@@ -44,7 +52,33 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     output = output if output is not None else sys.stdout
     error_output = error_output if error_output is not None else sys.stderr
     terminal = input_stream.isatty() and output.isatty()
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    memory_store = memory_store if memory_store is not None else MemoryStore(Path.cwd())
+    if not isinstance(memory_store, MemoryStore):
+        raise ValueError("memory_store 必须是 MemoryStore。")
+    notes_store = notes_store if notes_store is not None else NotesStore(Path.cwd())
+    if not isinstance(notes_store, NotesStore):
+        raise ValueError("notes_store 必须是 NotesStore。")
+    memory_load_error = None
+    memory_records = []
+    if memory_enabled:
+        try:
+            memory_records = memory_store.records()
+        except Exception as error:
+            memory_load_error = str(error)
+    notes_load_error = None
+    notes_content = ""
+    if notes_enabled:
+        try:
+            notes_content = notes_store.read()
+        except Exception as error:
+            notes_load_error = str(error)
+    messages = [{
+        "role": "system",
+        "content": memory_system_prompt(
+            notes_system_prompt(SYSTEM_PROMPT, notes_content),
+            memory_records,
+        ),
+    }]
     abort = Event()
     background_manager = BackgroundManager(**get_settings()["background"])
     background_default_timeout = get_settings()["background"]["default_timeout"]
@@ -79,11 +113,141 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             end_stream_line()
             print(text, file=error_output if error else output, flush=True)
 
+    def save_memory_summary():
+        nonlocal messages
+        if not memory_enabled or not has_memory_candidates(messages):
+            return
+        try:
+            result = summarize_session(client, messages, model=DEFAULT_MODEL)
+            response = result["response"]
+            if response is not None:
+                payload = response if isinstance(response, dict) else {}
+                ledger.record(
+                    usage=payload.get("usage"), model=payload.get("model", DEFAULT_MODEL),
+                    turn=turn, created=payload.get("created"),
+                )
+            record = memory_store.add(
+                result["summary"], topics=result["topics"],
+                message_count=sum(
+                    1 for message in messages if message.get("role") in {"user", "assistant"}
+                ),
+            )
+            write(f"[memory] 已保存本次会话摘要 #{record['id']}。")
+        except Exception as error:
+            write(f"[memory] 保存会话摘要失败：{error}", error=True)
+
+    def handle_memory_command(text):
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            write("用法：/memory [list|show <id>|delete <id> --yes|clear --yes]")
+            return
+        if len(parts) == 1 or parts[1:] == ["list"]:
+            try:
+                records = memory_store.records()
+            except Exception as error:
+                write(f"[memory] 读取记忆失败：{error}", error=True)
+                return
+            if not records:
+                write("暂无本地记忆。")
+                return
+            write("本地记忆：\n" + "\n".join(format_record(record) for record in records))
+            return
+        if parts[1] == "show" and len(parts) == 3:
+            try:
+                record = memory_store.get(parts[2])
+            except Exception as error:
+                write(f"[memory] 读取记忆失败：{error}", error=True)
+                return
+            if record is None:
+                write(f"未找到记忆 #{parts[2]}。")
+            else:
+                write(format_record(record))
+            return
+        if parts[1] == "delete" and len(parts) == 4 and parts[3] == "--yes":
+            try:
+                deleted = memory_store.delete(parts[2])
+            except Exception as error:
+                write(f"[memory] 删除记忆失败：{error}", error=True)
+                return
+            write(f"已删除记忆 #{parts[2]}。" if deleted else f"未找到记忆 #{parts[2]}。")
+            return
+        if parts[1] == "delete":
+            write("删除记忆需要显式确认：/memory delete <id> --yes")
+            return
+        if parts[1] == "clear" and len(parts) == 3 and parts[2] == "--yes":
+            try:
+                count = memory_store.clear()
+            except Exception as error:
+                write(f"[memory] 清空记忆失败：{error}", error=True)
+                return
+            write(f"已清空 {count} 条本地记忆。")
+            return
+        if parts[1] == "clear":
+            write("清空全部记忆需要显式确认：/memory clear --yes")
+            return
+        write("用法：/memory [list|show <id>|delete <id> --yes|clear --yes]")
+
+    def handle_notes_command(text):
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            write("用法：/notes [append <text>|replace --yes <text>|clear --yes]")
+            return
+        if len(parts) == 1:
+            try:
+                content = notes_store.read()
+            except Exception as error:
+                write(f"[notes] 读取项目笔记失败：{error}", error=True)
+                return
+            if not content.strip():
+                write("HARNESS.md 暂无内容。")
+            else:
+                write("HARNESS.md：\n" + _preview_text(content))
+            return
+        if parts[1] == "append" and len(parts) >= 3:
+            content = shlex.join(parts[2:])
+            try:
+                appended = notes_store.append(content)
+            except Exception as error:
+                write(f"[notes] 追加项目笔记失败：{error}", error=True)
+                return
+            write(f"已追加项目笔记（{appended} 字节）。")
+            return
+        if parts[1] == "append":
+            write("用法：/notes append <text>")
+            return
+        if parts[1] == "replace" and len(parts) >= 4 and parts[2] == "--yes":
+            content = shlex.join(parts[3:])
+            try:
+                written = notes_store.replace(content)
+            except Exception as error:
+                write(f"[notes] 替换项目笔记失败：{error}", error=True)
+                return
+            write(f"已替换项目笔记（{written} 字节）。")
+            return
+        if parts[1] == "replace":
+            write("替换全部项目笔记需要显式确认：/notes replace --yes <text>")
+            return
+        if parts[1] == "clear" and len(parts) == 3 and parts[2] == "--yes":
+            try:
+                notes_store.clear()
+            except Exception as error:
+                write(f"[notes] 清空项目笔记失败：{error}", error=True)
+                return
+            write("已清空 HARNESS.md。")
+            return
+        if parts[1] == "clear":
+            write("清空项目笔记需要显式确认：/notes clear --yes")
+            return
+        write("用法：/notes [append <text>|replace --yes <text>|clear --yes]")
+
     def confirm_tool(name, arguments, workspace):
         nonlocal pending_confirmation
         label = {
             "write_file": "写入", "bash": "命令执行", "background_submit": "后台任务",
             "swarm": "团队协作", "run_verify": "验证",
+            "notes_append": "追加项目笔记", "notes_replace": "替换项目笔记",
         }.get(name, "工具调用")
         if not terminal:
             write(f"[确认] 非交互模式无法确认{label}，已拒绝本次操作。")
@@ -161,6 +325,22 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                         f"工作目录：{_preview_text(str(workspace), multiline=False)}\n"
                         f"超时：{arguments.get('timeout', DEFAULT_TIMEOUT)} 秒\n"
                     )
+                elif name in {"notes_append", "notes_replace"}:
+                    candidate = Path(workspace) / "HARNESS.md"
+                    path = candidate.resolve()
+                    existed = path.exists()
+                    action = "替换 HARNESS.md 的全部内容" if name == "notes_replace" else "追加到 HARNESS.md"
+                    content = "\n".join(
+                        "│ " + line for line in
+                        _preview_text(arguments["content"]).split("\n")
+                    )
+                    preview = (
+                        f"\n[项目笔记确认] {name}\n{risk}\n"
+                        f"目标：{_preview_text('HARNESS.md', multiline=False)}\n"
+                        f"操作：{action}\n"
+                        "完整内容（控制字符转义显示，换行和制表符保留）：\n"
+                        f"┌── 笔记内容开始 ──\n{content}\n└── 笔记内容结束 ──\n"
+                    )
                 else:
                     parameters = _preview_text(json.dumps(arguments, ensure_ascii=False, indent=2))
                     preview = (
@@ -176,7 +356,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             with confirmation_lock:
                 if not request["approved"] or input_closed or abort.is_set():
                     return False
-                if name == "write_file" and (candidate.resolve() != path or path.exists() != existed):
+                if name in {"write_file", "notes_append", "notes_replace"} and (
+                    candidate.resolve() != path or path.exists() != existed
+                ):
                     write("[确认] 目标路径或文件存在状态已变化，本次确认失效，未写入；请重新发起写入请求。")
                     return False
                 return True
@@ -335,6 +517,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             show_prompt()
 
     write(f"DeepSeek 查询引擎 · {DEFAULT_MODEL}\n{HELP}")
+    if memory_load_error:
+        write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
+    if notes_load_error:
+        write(f"[notes] 启动时未加载项目笔记：{notes_load_error}", error=True)
     try:
         while True:
             if not worker or not worker.is_alive():
@@ -348,6 +534,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if worker:
                     worker.join()
                 background_manager.shutdown()
+                save_memory_summary()
                 return
             text = line.strip()
             if text == "/exit":
@@ -358,6 +545,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 background_manager.shutdown()
                 with output_lock:
                     end_stream_line()
+                save_memory_summary()
                 return
             if text == "/help":
                 write(HELP)
@@ -376,6 +564,14 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                         write(f"权限模式已切换为 {permission_mode}{suffix}。")
                     except ValueError as error:
                         write(f"错误：{error}", error=True)
+            elif text.startswith("/memory") and worker and worker.is_alive():
+                write("上一轮查询进行中，暂时无法管理记忆；期间可以输入 /cost。")
+            elif text.startswith("/memory"):
+                handle_memory_command(text)
+            elif text.startswith("/notes") and worker and worker.is_alive():
+                write("上一轮查询进行中，暂时无法管理项目笔记；期间可以输入 /cost。")
+            elif text.startswith("/notes"):
+                handle_notes_command(text)
             elif text == "/cost":
                 write(format_cost(ledger))
                 if worker and worker.is_alive():
