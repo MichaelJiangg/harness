@@ -10,7 +10,7 @@ from .background import BackgroundManager, COMPLETED
 from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
-from .permissions import SessionPermissionCache, get_risk_level
+from .permissions import PermissionPolicy, SessionPermissionCache, get_risk_level
 from .tools import create_tool_executor
 from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
 from .tools.swarm import DEFAULT_ROLES as DEFAULT_SWARM_ROLES
@@ -28,6 +28,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 耗时测试、批量命令和大型独立分析可通过 background_submit 提交后台，background_check 查询状态和结果。
 多角色接力任务可通过 swarm 启动团队协作，角色拥有独立上下文并按交接协议传递成果。
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
+/mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -47,6 +48,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     abort = Event()
     background_manager = BackgroundManager(**get_settings()["background"])
     background_default_timeout = get_settings()["background"]["default_timeout"]
+    security_settings = get_settings()["security"]
+    permission_mode = security_settings["mode"]
+    auto_directories = list(security_settings["auto_directories"])
     output_lock = Lock()
     confirmation_lock = Lock()
     pending_confirmation = None
@@ -205,10 +209,22 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if request is not None:
                 request["done"].set()
 
-    tool_executor = create_tool_executor(
-        confirm=confirm_tool, abort=abort, session_cache=SessionPermissionCache(),
-        background_manager=background_manager,
-    )
+    session_cache = SessionPermissionCache()
+
+    def build_tool_executor():
+        settings = get_settings()
+        kwargs = {
+            "confirm": confirm_tool, "abort": abort, "session_cache": session_cache,
+            "background_manager": background_manager,
+        }
+        if permission_mode != "ask" or auto_directories:
+            kwargs["permissions"] = PermissionPolicy(
+                mode=permission_mode, auto_directories=auto_directories,
+                **settings["permissions"],
+            )
+        return create_tool_executor(**kwargs)
+
+    tool_executor = build_tool_executor()
 
     def on_event(event):
         nonlocal stream_line_open, response_streamed
@@ -345,6 +361,21 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 return
             if text == "/help":
                 write(HELP)
+            elif text.startswith("/mode") and worker and worker.is_alive():
+                write("上一轮查询进行中，暂时无法切换权限模式；期间可以输入 /cost。")
+            elif text.startswith("/mode"):
+                parts = text.split()
+                if len(parts) not in {2, 3} or parts[1] not in {"ask", "auto"}:
+                    write("用法：/mode ask|auto [目录]")
+                else:
+                    try:
+                        permission_mode = parts[1]
+                        auto_directories = [parts[2]] if len(parts) == 3 else []
+                        tool_executor = build_tool_executor()
+                        suffix = f"：{auto_directories[0]}" if auto_directories else "：当前工作目录"
+                        write(f"权限模式已切换为 {permission_mode}{suffix}。")
+                    except ValueError as error:
+                        write(f"错误：{error}", error=True)
             elif text == "/cost":
                 write(format_cost(ledger))
                 if worker and worker.is_alive():

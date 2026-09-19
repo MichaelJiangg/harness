@@ -3,6 +3,7 @@
 import posixpath
 import re
 import shlex
+from pathlib import Path
 
 
 _LEVELS = {"read_only": 0, "write": 1, "destructive": 2}
@@ -19,6 +20,10 @@ _PIPE_EXEC = re.compile(
 )
 _SENSITIVE = re.compile(
     r"(?:^|[\s'\"=])(?:/etc|/usr|/System|/root|/dev|~/\.ssh)(?:/|$|[\s'\"])",
+)
+_AUTO_DANGEROUS = re.compile(
+    r"\b(?:curl|wget|ssh|scp|rsync|git\s+push|git\s+fetch|kill|pkill|killall|"
+    r"chmod|chown|sudo|mkfs|dd|shutdown|reboot|nohup|npm\s+(?:install|ci|audit|publish|add))\b"
 )
 _SYSTEM_COMMANDS = {
     "ls": "ls", "/bin/ls": "ls", "/usr/bin/ls": "ls",
@@ -76,6 +81,57 @@ def classify_bash_risk(command: str) -> str:
         else:
             parts[-1].append(token)
     return max((_simple_risk(part) for part in parts), key=_LEVELS.__getitem__)
+
+
+def bash_auto_allowed(command, workspace, auto_directories=()):
+    """Auto 模式只排除明确危险，不假装能理解任意 Shell 语义。"""
+    if not isinstance(command, str) or not command.strip():
+        return False
+    if classify_bash_risk(command) == "destructive":
+        return False
+    if _SENSITIVE.search(command) or _AUTO_DANGEROUS.search(command):
+        return False
+    if ".." in command or "$(" in command or "`" in command:
+        return False
+    inspection = re.sub(r"\b2\s*>\s*/dev/null\b", "", command)
+    if any(character in inspection for character in "<>"):
+        return False
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if not tokens or any(char in command for char in "(){}"):
+        return False
+
+    root = Path(workspace).resolve()
+    roots = [root] if not auto_directories else [
+        (root / directory).resolve() for directory in auto_directories
+    ]
+    parts = [[]]
+    for token in tokens:
+        if token in {"&&", ";", "||"}:
+            parts.append([])
+        elif token in {"&", "|"}:
+            return False
+        else:
+            parts[-1].append(token)
+    current = root if any(root.is_relative_to(allowed) for allowed in roots) else None
+    for part in parts:
+        if not part:
+            continue
+        if part[0] == "cd":
+            if len(part) < 2:
+                continue
+            candidate = (root / part[1]).resolve()
+            if not any(candidate.is_relative_to(allowed) for allowed in roots):
+                return False
+            current = candidate
+        elif current is None:
+            return False
+    return True
 
 
 def _simple_risk(tokens):

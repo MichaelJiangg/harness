@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 实现并发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；已修复真实运行中的多文件子查询压缩上限、Swarm 请求预算、频繁只读命令确认和内部过程输出过多问题。当前工作版本全部 518 项离线测试通过，最近已发布版本为 V0.5 Agent 编排。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 实现并发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；新增 `ask`／`auto` 权限模式，减少团队开发中重复确认。当前工作版本全部 521 项离线测试通过，最近已发布版本为 V0.5 Agent 编排。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
 最近公开版本为 [V0.5 — Add-Agent 编排](https://github.com/MichaelJiangg/harness/releases/tag/v0.5) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.5`。
 
@@ -96,6 +96,7 @@
 - 扩展保守只读 Bash 白名单，并让 Swarm 角色优先使用 `read_file`／`grep` 检查文件，减少复合只读命令的重复确认；解释器脚本、写操作和破坏性命令仍逐次确认。
 - 新增受限验证工具 `run_verify`，仅运行工作区内明确的 Node／Python 脚本；Swarm 内部工具、请求、压缩和重试日志默认静默，只显示角色级进度。
 - `run_verify` 增加 `node-test`、`npm-test` 目录验证和会话目录授权，包含 `bash` 的 Swarm 角色自动继承该工具；首次批准后同一目录后续测试免重复确认。
+- 新增 `ask`／`auto` 权限模式：CLI `/mode auto [目录]` 信任当前或指定工作目录，自动放行工作区内读写、验证和常见脚本，仍拦截网络、破坏性、进程管理和敏感路径操作。
 
 ## 进行中
 
@@ -113,6 +114,7 @@
 
 ## 最近验证
 
+- 2026-09-20：执行 `python3 -m unittest discover -s tests -q`，521 项全部通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。新增 ask／auto 权限模式、信任目录校验、危险操作保护和 CLI 模式切换回归；使用模拟模型和临时文件，未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
 - 2026-09-20：执行 `python3 -m unittest discover -s tests -q`，518 项全部通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。新增 Swarm 角色定义、交接解析、打回循环、最大轮次、角色工具隔离、独立请求预算、保守只读 Bash 白名单、受限验证目录授权和静默编排输出回归；使用模拟模型和临时文件，未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
 - 2026-09-18：复现单任务包含五批工具结果、序列化 28528 字符时原切分的可摘要消息数为 0；新切分保留 5780 字符、释放八条消息供摘要。补充完整工具批次、原任务保留、孤立／重复／缺失结果、旧摘要合并、合法首摘要仍超限时的第二次压缩、两次无效摘要回滚、停止后重复委托及新提问恢复回归。临时工作目录运行全部 463 项测试通过，帮助入口及 `git diff --check` 通过。默认全部工具与 24000 字符限制下，五份大文件的子查询两次将 26357／26418 字符压缩至 10990 字符并交回报告，总计 10 次请求，计数与账本一致。验证使用模拟模型和真实临时文件，未读取／修改实际 `.env`、未调用真实 API、未推送或发布。
 - 2026-09-18：临时工作目录运行全部 449 项离线测试通过，帮助入口与 `git diff --check` 通过。新增覆盖主子对话和调用标识隔离、读文件报告回传、子工具范围与递归阻断、权限禁止及写入确认继承、会话授权和审计、总请求额度与重试计费、子任务失败后的主查询恢复，以及等待期间 `/cost` 和退出取消。独立代码审查未发现隔离、预算、权限或取消的阻塞问题；未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布本轮变更。

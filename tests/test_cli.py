@@ -151,6 +151,21 @@ class CLITests(unittest.TestCase):
         self.assertIn("未知命令，输入 /help 查看帮助。", output.getvalue())
         self.assertEqual(errors.getvalue(), "")
 
+    def test_mode_command_switches_auto_and_rejects_invalid_value(self):
+        output = StringIO()
+        errors = StringIO()
+        run_cli(
+            Mock(),
+            input_stream=StringIO("/mode auto\n/mode invalid\n/mode ask\n/exit\n"),
+            output=output,
+            error_output=errors,
+        )
+        text = output.getvalue()
+        self.assertIn("权限模式已切换为 auto：当前工作目录。", text)
+        self.assertIn("用法：/mode ask|auto [目录]", text)
+        self.assertIn("权限模式已切换为 ask：当前工作目录。", text)
+        self.assertEqual(errors.getvalue(), "")
+
     def test_eof_waits_for_the_answer_to_a_single_question(self):
         started = Event()
         release = Event()

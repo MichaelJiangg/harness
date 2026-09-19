@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import unicodedata
 
-from .bash_risk import classify_bash_risk
+from .bash_risk import bash_auto_allowed, classify_bash_risk
 
 
 # 风险等级与权限决策是两件事：高风险默认仍须确认，由 CLI 加醒目警告；
@@ -184,6 +184,8 @@ class PermissionPolicy:
     ask: frozenset[str] = frozenset()
     deny: frozenset[str] = frozenset()
     rules: tuple[PermissionRule, ...] = ()
+    mode: str = "ask"
+    auto_directories: frozenset[str] = frozenset()
 
     def __post_init__(self):
         for name in ("allow", "ask", "deny"):
@@ -194,6 +196,16 @@ class PermissionPolicy:
                    for value in values):
                 raise ValueError(f"权限 {name} 必须包含有效的非空工具名称。")
             object.__setattr__(self, name, frozenset(values))
+        if self.mode not in {"ask", "auto"}:
+            raise ValueError("权限模式必须是 ask 或 auto。")
+        directories = self.auto_directories
+        if not isinstance(directories, (list, tuple, set, frozenset)):
+            raise ValueError("auto_directories 必须是目录列表。")
+        if any(not isinstance(value, str) or not value.strip() or "\x00" in value
+               or Path(value).is_absolute() or ".." in Path(value).parts
+               for value in directories):
+            raise ValueError("auto_directories 必须是工作区内的非空相对目录。")
+        object.__setattr__(self, "auto_directories", frozenset(directories))
         object.__setattr__(self, "rules", parse_rules(self.rules))
 
     def check(self, name, params=None, *, workspace=None):
@@ -205,6 +217,9 @@ class PermissionPolicy:
         # 工具级 deny 直接返回，目录规则和会话授权都不能覆盖它。
         if name in self.deny:
             return PermissionDecision("deny", risk, "tools:deny", "当前工具位于配置的 deny 列表中。")
+        if self.mode == "auto" and self._auto_allowed(name, params, workspace):
+            return PermissionDecision("allow", risk, "session:auto",
+                                      "auto 模式已授权当前工作区内操作。")
         # 以下只是准备兜底，并不提前返回；细粒度规则仍有机会先决定结果。
         # 写文件不能仅凭工具名 allow 放行，Bash 的 allow 也不能跳过风险判断。
         if name in self.ask or name == "write_file":
@@ -218,6 +233,31 @@ class PermissionPolicy:
         if result.matched_rule == "default" and default is not None:
             result = replace(result, matched_rule=f"tools:{default}", reason="使用工具级默认权限配置。")
         return result
+
+    def _auto_allowed(self, name, params, workspace):
+        root = Path.cwd() if workspace is None else Path(workspace)
+        root = root.resolve()
+        if name == "bash":
+            command = params.get("command") if isinstance(params, dict) else None
+            return isinstance(command, str) and bash_auto_allowed(
+                command, root, self.auto_directories,
+            )
+        if name not in {"read_file", "grep", "write_file", "run_verify"}:
+            return False
+        key = "path" if name in {"read_file", "grep", "write_file"} else "target"
+        raw = params.get(key) if isinstance(params, dict) else None
+        if not isinstance(raw, str) or not raw.strip() or "\x00" in raw:
+            return False
+        if name == "grep" and raw == ".":
+            raw = "."
+        try:
+            candidate = (root / raw).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        roots = [root] if not self.auto_directories else [
+            (root / directory).resolve() for directory in self.auto_directories
+        ]
+        return any(candidate.is_relative_to(allowed) for allowed in roots)
 
 
 class SessionPermissionCache:

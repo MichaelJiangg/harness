@@ -55,6 +55,7 @@ class ProjectConfigTests(unittest.TestCase):
             "max_requests": 20, "max_retries": 3, "retry_initial_delay": 1.0, "retry_backoff": 2.0,
         })
         self.assertEqual(settings["background"], {"max_concurrent": 5, "default_timeout": 300})
+        self.assertEqual(settings["security"], {"mode": "ask", "auto_directories": []})
         self.assertEqual(settings["swarm"], {"max_requests": 120, "max_role_requests": 40})
         self.assertEqual(settings["context"], {
             "max_chars": 64000, "summary_chars": 2000, "keep_recent_turns": 4,
@@ -228,6 +229,8 @@ class ProjectConfigTests(unittest.TestCase):
                          ("[tool.harness.background]\nmax_concurrent = 5\ndefault_timeout = 300",
                           "[tool.harness.background]\nmax_concurrent = 5\ndefault_timeout = 301"),
                          ("max_role_requests = 40", "max_role_requests = 121"),
+                         ('mode = "ask"', 'mode = "invalid"'),
+                         ("auto_directories = []", 'auto_directories = ["/etc"]'),
                          ("default_max_results = 100", "default_max_results = 501"),
                          ("page_lines = 200", "page_lines = 0"),
                          ("request_timeout = 120", "request_timeout = 0"),

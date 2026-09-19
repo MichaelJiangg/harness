@@ -333,7 +333,13 @@ def execute_tool(name, arguments, *, workspace=None, confirm=None, abort=None, p
 
 def _get_permissions(permissions):
     if permissions is None:
-        return PermissionPolicy(**get_settings()["permissions"])
+        settings = get_settings()
+        security = settings.get("security", {"mode": "ask", "auto_directories": []})
+        return PermissionPolicy(
+            mode=security["mode"],
+            auto_directories=security["auto_directories"],
+            **settings["permissions"],
+        )
     if not isinstance(permissions, PermissionPolicy):
         raise ValueError("permissions 必须是 PermissionPolicy。")
     return permissions

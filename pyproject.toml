@@ -27,6 +27,10 @@ retry_backoff = 2.0
 max_concurrent = 5
 default_timeout = 300
 
+[tool.harness.security]
+mode = "ask"
+auto_directories = []
+
 [tool.harness.swarm]
 max_requests = 120
 max_role_requests = 40

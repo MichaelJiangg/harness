@@ -43,6 +43,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | --- | --- |
 | `/cost` | 查询本次会话用量、USD 预估费用和逐请求明细，不调用模型；等待回答时也可使用 |
 | `/compact` | 空闲时让模型总结旧对话，保留最近几轮；摘要请求计入 `/cost` |
+| `/mode ask|auto [目录]` | 切换权限模式；auto 模式信任当前或指定工作目录 |
 | `/help` | 查看帮助 |
 | `/exit` | 退出，停止后续模型和工具调用 |
 
@@ -59,6 +60,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `[tool.harness.display]` | 逐字显示间隔，`character_delay = 0.02` 表示 20 毫秒 |
 | `[tool.harness.engine]` | 请求上限、重试次数、首次等待与递增倍数 |
 | `[tool.harness.background]` | 后台任务并发上限与默认超时 |
+| `[tool.harness.security]` | 默认权限模式与 auto 模式信任目录 |
 | `[tool.harness.swarm]` | Swarm 团队总请求上限与单角色请求上限 |
 | `[tool.harness.context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
 | `[tool.harness.tools]` 及其 `bash`、`grep` 子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
@@ -98,6 +100,15 @@ rules = []
 | `deny` | 直接返回 `permission_denied` 给模型，不进入确认或执行 |
 
 工具名列表使用精确名称，优先级为 `deny` 高于 `ask` 高于 `allow`。未配置的工具按风险等级兜底：读取、搜索及明确识别的只读命令默认 `allow`，写入、其他 Bash 和新注册工具默认 `ask`；未注册工具仍返回 `unknown_tool`。将 `bash` 加入 `deny` 即可禁止所有命令，加入 `ask` 则连 `pwd` 也要求确认。
+
+会话支持两种权限模式：
+
+| 模式 | 行为 |
+| --- | --- |
+| `ask` | 默认模式，按规则和风险逐条确认 |
+| `auto` | 信任当前工作目录或 `/mode auto <dir>` 指定目录；读取、写入、验证和常见 Node/Python/Perl 脚本自动放行 |
+
+auto 模式不覆盖 `deny`，也不放行网络下载、`rm`、进程管理、写敏感路径、越界路径或任意重定向。所有自动放行的操作仍记录审计日志，确认状态为 `auto`。
 
 仅将 `write_file` 或 `bash` 加入工具名 `allow` 列表，不会免除写入或非只读命令的确认；写入可以通过目录规则或当前会话的目录授权放行。需要确认的新工具默认显示中风险、工具名和完整参数 JSON；读取工具或只读命令配置为 `ask` 时仍显示低风险，但必须确认。
 

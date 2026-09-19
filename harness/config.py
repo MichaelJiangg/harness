@@ -54,6 +54,14 @@ def _tool_names(value):
     )
 
 
+def _auto_directories(value):
+    return isinstance(value, list) and all(
+        isinstance(path, str) and path and "\x00" not in path and not Path(path).is_absolute()
+        and ".." not in Path(path).parts
+        for path in value
+    )
+
+
 def _permission_rules(value):
     if not isinstance(value, list):
         return False
@@ -91,6 +99,10 @@ _SCHEMA = {
     },
     "background": {
         "max_concurrent": _integer(1), "default_timeout": _integer(1),
+    },
+    "security": {
+        "mode": lambda value: value in {"ask", "auto"},
+        "auto_directories": _auto_directories,
     },
     "swarm": {
         "max_requests": _integer(1), "max_role_requests": _integer(1),
@@ -147,10 +159,13 @@ def load_settings(path=None):
     tool = document.get("tool")
     settings = tool.get("harness") if isinstance(tool, dict) else None
     _validate_table(settings, _SCHEMA)
-    context, background, swarm, bash, grep = (
-        settings["context"], settings["background"], settings["swarm"],
+    context, background, security, swarm, bash, grep = (
+        settings["context"], settings["background"], settings["security"], settings["swarm"],
         settings["tools"]["bash"], settings["tools"]["grep"],
     )
+    if security["mode"] == "auto" and not security["auto_directories"]:
+        # 空列表表示信任会话启动目录；启动时允许，运行时按当前工作区解析。
+        pass
     if background["default_timeout"] > 300:
         raise ValueError("pyproject.toml 的后台任务默认超时不能超过 300 秒。")
     if swarm["max_role_requests"] > swarm["max_requests"]:
