@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 实现并发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；新增 `ask`／`auto` 权限模式，减少团队开发中重复确认。当前工作版本全部 521 项离线测试通过，最近已发布版本为 V0.5 Agent 编排。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，减少团队开发中重复确认。当前工作版本全部 521 项离线测试通过，最近已发布版本为 V0.5.1 Add-Auto 模式。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.5 — Add-Agent 编排](https://github.com/MichaelJiangg/harness/releases/tag/v0.5) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.5`。
+最近公开版本为 [V0.5.1 — Add-Auto 模式](https://github.com/MichaelJiangg/harness/releases/tag/v0.5.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.5.1`。
 
 ## 已完成
 

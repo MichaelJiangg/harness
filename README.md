@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+，仅使用标准库，零第三方运行依赖。
 
-最近发布：**V0.5 — Add-Agent 编排**（Git 标签 `v0.5`）。新增独立委托、后台任务、多角色 Swarm 协作和受限验证工具，继续沿用 V0.4 权限系统。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.5.1 — Add-Auto 模式**（Git 标签 `v0.5.1`）。在 V0.5 Agent 编排基础上增加 `ask`／`auto` 权限模式，减少团队开发中的重复确认。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 

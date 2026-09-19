@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.5.0")
+        self.assertEqual(project["version"], "0.5.1")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], [])
         self.assertEqual(project["readme"], "README.md")
