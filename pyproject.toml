@@ -1,10 +1,10 @@
 [project]
 name = "harness"
-version = "0.6.0"
+version = "0.6.1"
 description = "A Python query engine with DeepSeek and a local tool system."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["rich>=13.0"]
 
 [project.urls]
 Repository = "https://github.com/MichaelJiangg/harness"

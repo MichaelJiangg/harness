@@ -63,7 +63,7 @@ class SwarmCLITests(unittest.TestCase):
             self.assertTrue(session.output.wait_for("[swarm] Coder 开始工作"))
             self.assertTrue(session.output.wait_for("[swarm] Reviewer 完成"))
             self.assertTrue(session.output.wait_for("[swarm] 团队协作完成（3 轮）"))
-            self.assertTrue(session.output.wait_for("DeepSeek > 团队协作结果已整理。"))
+            self.assertTrue(session.output.wait_for("团队协作结果已整理。"))
             session.close()
             self.assertEqual(session.errors.getvalue(), "")
             self.assertEqual(client.complete.call_count, 6)

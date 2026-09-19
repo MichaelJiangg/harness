@@ -34,13 +34,13 @@ class ProjectConfigTests(unittest.TestCase):
         with patch.object(config.tomllib, "load", return_value={"tool": {"harness": settings}}):
             return config.load_settings(self.path)
 
-    def test_metadata_has_python_version_and_no_dependencies(self):
+    def test_metadata_has_python_version_and_rich_dependency(self):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.6.0")
+        self.assertEqual(project["version"], "0.6.1")
         self.assertEqual(project["requires-python"], ">=3.11")
-        self.assertEqual(project["dependencies"], [])
+        self.assertEqual(project["dependencies"], ["rich>=13.0"])
         self.assertEqual(project["readme"], "README.md")
         self.assertEqual(project["urls"]["Repository"], "https://github.com/MichaelJiangg/harness")
 

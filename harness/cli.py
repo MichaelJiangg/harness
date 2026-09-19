@@ -7,6 +7,13 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event, Lock, Thread
 
+from rich.console import Console, Group
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
+
 from .background import BackgroundManager, COMPLETED
 from .client import DEFAULT_MODEL
 from .config import get_settings
@@ -52,6 +59,14 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     output = output if output is not None else sys.stdout
     error_output = error_output if error_output is not None else sys.stderr
     terminal = input_stream.isatty() and output.isatty()
+    console = Console(
+        file=output, force_terminal=terminal, highlight=True, color_system="standard",
+        no_color=False,
+    )
+    error_console = Console(
+        file=error_output, force_terminal=terminal, highlight=False, color_system="standard",
+        no_color=False,
+    )
     memory_store = memory_store if memory_store is not None else MemoryStore(Path.cwd())
     if not isinstance(memory_store, MemoryStore):
         raise ValueError("memory_store 必须是 MemoryStore。")
@@ -92,6 +107,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     turn = 0
     stream_line_open = False
     response_streamed = False
+    stream_buffer = ""
+    stream_live = None
     prompt_shown = False
     input_closed = False
 
@@ -99,19 +116,102 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         nonlocal prompt_shown
         with output_lock:
             if terminal and not prompt_shown and not input_closed and not abort.is_set():
-                print("你 > ", end="", file=output, flush=True)
+                console.print(Text("你", style="bold cyan"), end=" ")
+                console.print(Text(">", style="bold cyan"), end=" ")
                 prompt_shown = True
+
+    def stop_stream_live():
+        nonlocal stream_live
+        if stream_live is not None:
+            try:
+                stream_live.stop()
+            except Exception:
+                pass
+            stream_live = None
 
     def end_stream_line():
         nonlocal stream_line_open
-        if stream_line_open:
+        if terminal:
+            stop_stream_live()
+        elif stream_line_open:
             print(file=output, flush=True)
             stream_line_open = False
 
-    def write(text, *, error=False):
+    def write(text, *, error=False, style=None):
         with output_lock:
             end_stream_line()
-            print(text, file=error_output if error else output, flush=True)
+            if terminal:
+                target = error_console if error else console
+                resolved_style = style or ("bold red" if error else None)
+                target.print(
+                    Text(_preview_text(str(text)), style=resolved_style, overflow="fold"),
+                    soft_wrap=True,
+                )
+            else:
+                print(text, file=error_output if error else output, flush=True)
+
+    def write_markdown(title, content):
+        with output_lock:
+            if terminal:
+                stop_stream_live()
+                console.print(Panel(
+                    Markdown(_preview_text(content), code_theme="monokai", justify="left"),
+                    title=title,
+                    border_style="cyan",
+                    expand=False,
+                    padding=(0, 1),
+                ))
+            else:
+                end_stream_line()
+                print(f"\nDeepSeek > {content}", file=output, flush=True)
+
+    def start_stream():
+        nonlocal response_streamed, stream_buffer, stream_line_open, stream_live
+        response_streamed = False
+        if not terminal:
+            stream_line_open = False
+            return
+        with output_lock:
+            stop_stream_live()
+            stream_buffer = ""
+            stream_live = Live(
+                Panel(
+                    Markdown("", code_theme="monokai"),
+                    title="Assistant",
+                    border_style="cyan",
+                    padding=(0, 1),
+                ),
+                console=console,
+                auto_refresh=False,
+                vertical_overflow="visible",
+            )
+            stream_live.start()
+
+    def append_stream(fragment):
+        nonlocal response_streamed, stream_buffer, stream_line_open
+        if not terminal:
+            with output_lock:
+                if not stream_line_open:
+                    print("\nDeepSeek > " if not response_streamed else "DeepSeek > ",
+                          end="", file=output, flush=True)
+                print(fragment, end="", file=output, flush=True)
+                stream_line_open = True
+                response_streamed = True
+            return
+        stream_buffer += fragment
+        response_streamed = True
+        with output_lock:
+            if stream_live is not None:
+                try:
+                    stream_live.update(Panel(
+                        Markdown(stream_buffer, code_theme="monokai", justify="left"),
+                        title="Assistant",
+                        border_style="cyan",
+                        padding=(0, 1),
+                    ))
+                    stream_live.refresh()
+                except Exception:
+                    pass
 
     def save_memory_summary():
         nonlocal messages
@@ -349,8 +449,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                         f"完整参数：\n{parameters}\n"
                     )
                 pending_confirmation = request
+                confirmation_style = "red" if risk.startswith("!!!!!!!!!!!!!!!!") else "yellow"
                 write(
-                    preview + f"[确认] 输入 y 批准本次{label}，n 或直接回车拒绝；/cost、/help、/exit 仍可使用。"
+                    preview + f"[确认] 输入 y 批准本次{label}，n 或直接回车拒绝；/cost、/help、/exit 仍可使用。",
+                    style=confirmation_style,
                 )
             request["done"].wait()
             with confirmation_lock:
@@ -408,6 +510,33 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     tool_executor = build_tool_executor()
 
+    def render_tool(name, arguments, result, prefix):
+        if not terminal:
+            write(f'{prefix}[工具] {name}：{_tool_result_summary(name, result)}')
+            return
+        with output_lock:
+            stop_stream_live()
+            parameters = _preview_text(json.dumps(arguments, ensure_ascii=False, indent=2))
+            summary = _tool_result_summary(name, result)
+            children = []
+            if arguments:
+                children.extend([
+                    Text("参数", style="bold cyan"),
+                    Syntax(parameters, "json", theme="monokai", word_wrap=True, line_numbers=False),
+                ])
+            children.extend([
+                Text("结果", style="bold cyan"),
+                Text(summary, style="default", overflow="fold"),
+            ])
+            border_style = "red" if result.get("status") == "error" else "cyan"
+            console.print(Panel(
+                Group(*children),
+                title=f"{prefix}{name}",
+                border_style=border_style,
+                expand=False,
+                padding=(0, 1),
+            ))
+
     def on_event(event):
         nonlocal stream_line_open, response_streamed
         if abort.is_set():
@@ -422,6 +551,12 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             else "[swarm] " if swarm
             else ""
         )
+        agent_style = (
+            "blue" if delegated
+            else "magenta" if background
+            else "green" if swarm
+            else None
+        )
         if (delegated or background or swarm) and event["type"] in {"text", "response_start"}:
             return
         if swarm and event["type"] in {
@@ -430,74 +565,97 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             return
         if event["type"] == "background_submitted":
             task = event["task"]
-            write(f'[background] 任务 #{task["task_id"]} 已提交：{_preview_text(task["description"], multiline=False)}')
+            write(
+                f'[background] 任务 #{task["task_id"]} 已提交：'
+                f'{_preview_text(task["description"], multiline=False)}',
+                style=agent_style,
+            )
         elif event["type"] == "background_started":
             task = event["task"]
-            write(f'[background] 任务 #{task["task_id"]}：状态 {task["status"]}')
+            write(
+                f'[background] 任务 #{task["task_id"]}：状态 {task["status"]}',
+                style=agent_style,
+            )
         elif event["type"] == "background_finished":
             task = event["task"]
             status = "已完成" if task["status"] == COMPLETED else "已失败"
-            write(f'[background] 任务 #{task["task_id"]}：{status}（耗时 {task["elapsed"]:.1f}s）')
+            write(
+                f'[background] 任务 #{task["task_id"]}：{status}（耗时 {task["elapsed"]:.1f}s）',
+                style="green" if status == "已完成" else "red",
+            )
         elif event["type"] == "swarm_start":
             roles = "、".join(event.get("roles", []))
-            write(f"[swarm] 角色分配：{roles}")
+            write(f"[swarm] 角色分配：{roles}", style=agent_style)
         elif event["type"] == "role_start":
-            write(f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}")
+            write(
+                f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}",
+                style=agent_style,
+            )
         elif event["type"] == "role_complete":
-            write(f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}")
+            write(
+                f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}",
+                style=agent_style,
+            )
         elif event["type"] == "handoff":
-            write(f"[swarm] {event.get('from')} 交给 {event.get('to')}")
+            write(f"[swarm] {event.get('from')} 交给 {event.get('to')}", style=agent_style)
         elif event["type"] == "swarm_complete":
-            write(f"[swarm] 团队协作完成（{event.get('rounds')} 轮）")
+            write(f"[swarm] 团队协作完成（{event.get('rounds')} 轮）", style="green")
         elif event["type"] == "swarm_failed":
-            write(f"[swarm] 团队协作失败：{_preview_text(event.get('message', ''), multiline=False)}")
+            write(
+                f"[swarm] 团队协作失败：{_preview_text(event.get('message', ''), multiline=False)}",
+                style="red",
+            )
         elif event["type"] == "delegate_start":
-            write(f'[delegate] 启动子任务：{_preview_text(event["description"], multiline=False)}')
+            write(
+                f'[delegate] 启动子任务：{_preview_text(event["description"], multiline=False)}',
+                style=agent_style,
+            )
         elif event["type"] == "delegate_complete":
-            write(f'[delegate] 子任务完成，返回结果：{_preview_text(event["description"], multiline=False)}')
+            write(
+                f'[delegate] 子任务完成，返回结果：'
+                f'{_preview_text(event["description"], multiline=False)}',
+                style=agent_style,
+            )
         elif event["type"] == "delegate_failed":
             description = _preview_text(event["description"], multiline=False)
             message = _preview_text(event["message"], multiline=False)
-            write(f"[delegate] 子任务失败：{description}；{message}")
+            write(f"[delegate] 子任务失败：{description}；{message}", style="red")
         elif event["type"] == "response_start":
-            response_streamed = False
+            start_stream()
         elif event["type"] == "text":
             fragments = event["text"] if terminal else (event["text"],)
             for fragment in fragments:
                 if abort.is_set():
                     return
-                with output_lock:
-                    if not stream_line_open:
-                        print("\nDeepSeek > " if not response_streamed else "DeepSeek > ", end="", file=output)
-                    print(fragment, end="", file=output, flush=True)
-                    stream_line_open = True
-                    response_streamed = True
+                append_stream(fragment)
                 if terminal and character_delay > 0 and abort.wait(character_delay):
                     return
         elif event["type"] == "usage":
-            write(prefix + format_usage(event["record"]))
+            write(prefix + format_usage(event["record"]), style="dim cyan")
         elif event["type"] == "tool":
-            result = event["result"]
-            message = result["message"]
-            if event["name"] == "read_file" and type(result.get("eof")) is bool:
-                if result["eof"]:
-                    message += " 本页已到文件末尾。"
-                else:
-                    message += f' 下一页：offset={result["next_offset"]}，column={result["next_column"]}。'
-            write(f'{prefix}[工具] {event["name"]}：{message}')
+            render_tool(event["name"], event.get("arguments", {}), event["result"], prefix)
         elif event["type"] == "compact_start":
-            write(f'{prefix}[压缩] 正在总结旧对话（第 {event["attempt"]} 次）。')
+            write(
+                f'{prefix}[压缩] 正在总结旧对话（第 {event["attempt"]} 次）。',
+                style="dim",
+            )
         elif event["type"] == "compact_done":
-            write(f'{prefix}[压缩] 已将上下文从 {event["before"]} 字符缩短至 {event["after"]} 字符。')
+            write(
+                f'{prefix}[压缩] 已将上下文从 {event["before"]} 字符缩短至 {event["after"]} 字符。',
+                style="dim",
+            )
         elif event["type"] == "compact_skipped":
-            write(prefix + "[压缩] 历史较短，无需压缩。")
+            write(prefix + "[压缩] 历史较短，无需压缩。", style="dim")
         elif event["type"] == "retry":
             if event["partial"]:
-                write(prefix + "[重试] 上次输出未完成，重新生成。")
-            write(f'{prefix}[重试] {event["message"]}；{event["delay"]} 秒后进行第 {event["attempt"]} 次重试。')
+                write(prefix + "[重试] 上次输出未完成，重新生成。", style="yellow")
+            write(
+                f'{prefix}[重试] {event["message"]}；{event["delay"]} 秒后进行第 {event["attempt"]} 次重试。',
+                style="yellow",
+            )
 
     def run_query(state, *, compact=False):
-        nonlocal messages
+        nonlocal messages, response_streamed
         try:
             if compact:
                 if compact_history(state, force=True) and not abort.is_set():
@@ -507,16 +665,27 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if not abort.is_set():
                 messages = state.messages
                 if not response_streamed:
-                    write(f"\nDeepSeek > {answer}")
+                    write_markdown("Assistant", answer)
         except QueryAborted:
             pass
         except Exception as error:
             if not abort.is_set():
                 write(f"错误：{error}", error=True)
         finally:
+            with output_lock:
+                stop_stream_live()
             show_prompt()
 
-    write(f"DeepSeek 查询引擎 · {DEFAULT_MODEL}\n{HELP}")
+    if terminal:
+        with output_lock:
+            console.print(Panel(
+                Text(f"Harness · {DEFAULT_MODEL}", style="bold cyan"),
+                border_style="cyan",
+                expand=False,
+            ))
+            console.print(Text(HELP, style="dim"), soft_wrap=True)
+    else:
+        write(f"DeepSeek 查询引擎 · {DEFAULT_MODEL}\n{HELP}")
     if memory_load_error:
         write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
     if notes_load_error:
@@ -603,6 +772,31 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             worker.join(timeout=1)
         background_manager.shutdown()
         write("\n查询已停止。")
+
+
+def _tool_result_summary(name, result):
+    """终端只显示结构摘要，不重复输出文件正文或子任务报告。"""
+    message = _preview_text(str(result.get("message", "")), multiline=False)
+    if name == "read_file" and type(result.get("eof")) is bool:
+        if result["eof"]:
+            message += " 本页已到文件末尾。"
+        else:
+            message += f' 下一页：offset={result["next_offset"]}，column={result["next_column"]}。'
+    if name == "grep":
+        message += f' 返回 {result.get("returned_count", 0)} 条匹配。'
+    if name == "bash":
+        message += (
+            f' 退出码：{result.get("exit_code")}'
+            f'，超时：{result.get("timed_out", False)}'
+            f'，取消：{result.get("cancelled", False)}'
+        )
+        stdout = _preview_text(str(result.get("stdout", "")), multiline=True)[:1200]
+        stderr = _preview_text(str(result.get("stderr", "")), multiline=True)[:1200]
+        if stdout.strip():
+            message += f'\nstdout：\n{stdout}'
+        if stderr.strip():
+            message += f'\nstderr：\n{stderr}'
+    return message
 
 
 def _confirmation_risk(name, arguments):

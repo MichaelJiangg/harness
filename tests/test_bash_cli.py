@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from harness.cli import HELP
 from harness.engine import query_loop
-from test_cli import CLISession, QueuedInput, reply
+from test_cli import CLISession, QueuedInput, reply, visible_text
 
 
 CONFIRM_PROMPT = "[确认] 输入 y 批准本次命令执行"
@@ -70,7 +70,7 @@ class BashCLITests(unittest.TestCase):
         command = "# 开头" + "甲" * 6100 + "尾部\nprintf done > marker.txt"
         session, client = self.start([bash_call(command)])
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
-        output = session.output.getvalue()
+        output = visible_text(session.output.getvalue())
         self.assertIn(f"工作目录：{self.root}", output)
         self.assertIn("超时：30 秒", output)
         self.assertIn("│ " + command.replace("\n", "\n│ "), output)
@@ -80,7 +80,7 @@ class BashCLITests(unittest.TestCase):
         self.assertFalse((self.root / "marker.txt").exists())
         client.complete.assert_called_once()
         session.input.send("y\n")
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         self.assertEqual((self.root / "marker.txt").read_text(), "done")
         self.assertEqual(self.results(client)[0]["exit_code"], 0)
         self.assertTrue(self.results(client)[0]["executed"])
@@ -92,7 +92,7 @@ class BashCLITests(unittest.TestCase):
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
         self.assertIn("超时：7 秒", session.output.getvalue())
         session.input.send("y\n")
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         result = self.results(client)[0]
         self.assertEqual(result["stdout"], "stdout-value")
         self.assertEqual(result["stderr"], "stderr-value")
@@ -107,7 +107,7 @@ class BashCLITests(unittest.TestCase):
                 session, client = self.start([bash_call("printf changed > marker.txt")])
                 self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
                 session.input.send(answer)
-                self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+                self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
                 self.assertFalse((self.root / "marker.txt").exists())
                 self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
                 session.close()
@@ -124,7 +124,7 @@ class BashCLITests(unittest.TestCase):
         self.assertFalse((self.root / "second.txt").exists())
         client.complete.assert_called_once()
         session.input.send("n\n")
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         self.assertEqual(session.output.getvalue().count(CONFIRM_PROMPT), 2)
         self.assertEqual(session.output.getvalue().count("风险等级：中风险"), 2)
         self.assertNotIn("高风险操作警告", session.output.getvalue())
@@ -144,7 +144,7 @@ class BashCLITests(unittest.TestCase):
             client.complete.assert_called_once()
             launch.assert_not_called()
             session.input.send("n\n")
-            self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+            self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
             session.close()
             launch.assert_not_called()
         self.assertEqual(self.results(client)[0]["code"], "confirmation_denied")
@@ -157,13 +157,13 @@ class BashCLITests(unittest.TestCase):
         session.input.send("/help\n")
         session.input.send("/compact\n")
         self.assertTrue(session.output.wait_for("暂时无法压缩"))
-        self.assertEqual(session.output.getvalue().count(HELP), 2)
+        self.assertEqual(session.output.getvalue().count("/help  查看帮助"), 2)
         session.input.send("yes\n")
         self.assertTrue(session.output.wait_for("正在等待本次命令执行确认"))
         self.assertFalse((self.root / "marker.txt").exists())
         client.complete.assert_called_once()
         session.input.send("n\n")
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         messages = client.complete.call_args_list[1].kwargs["messages"]
         self.assertEqual([message["content"] for message in messages if message["role"] == "user"], ["请执行命令"])
 
@@ -224,7 +224,7 @@ class BashCLITests(unittest.TestCase):
 
     def test_non_interactive_mode_rejects_without_prompting(self):
         session, client = self.start([bash_call("printf changed > marker.txt")], terminal=False)
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         self.assertIn("非交互模式无法确认命令执行", session.output.getvalue())
         self.assertNotIn(CONFIRM_PROMPT, session.output.getvalue())
         self.assertFalse((self.root / "marker.txt").exists())
@@ -268,19 +268,19 @@ class BashCLITests(unittest.TestCase):
         self.assertTrue(result["timed_out"])
         self.assertFalse(result["cancelled"])
         self.assertNotEqual(result["exit_code"], 0)
-        self.assertIn("DeepSeek > 命令请求处理完毕。", session.output.getvalue())
+        self.assertIn("命令请求处理完毕。", session.output.getvalue())
 
     def test_command_control_characters_are_escaped_without_changing_execution(self):
         content = "原文\x1b[2J\r末尾\u202e"
         session, client = self.start([bash_call(f"printf '%s' '{content}'")])
         self.assertTrue(session.output.wait_for(CONFIRM_PROMPT))
-        output = session.output.getvalue()
+        output = visible_text(session.output.getvalue())
         self.assertNotIn("\x1b", output)
         self.assertNotIn("\r", output)
         self.assertNotIn("\u202e", output)
         self.assertIn("原文\\u001b[2J\\u000d末尾\\u202e", output)
         session.input.send("y\n")
-        self.assertTrue(session.output.wait_for("DeepSeek > 命令请求处理完毕。"))
+        self.assertTrue(session.output.wait_for("命令请求处理完毕。"))
         self.assertEqual(self.results(client)[0]["stdout"], content)
 
 

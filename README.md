@@ -1,8 +1,8 @@
 # harness
 
-一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+，仅使用标准库，零第三方运行依赖。
+一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.6 — Add-记忆系统**（Git 标签 `v0.6`）。在 Agent 编排、Auto 权限模式基础上增加跨会话记忆和 `HARNESS.md` 项目长期笔记。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.6.1 — 美化样式**（Git 标签 `v0.6.1`）。在 V0.6 记忆与项目笔记基础上，使用 `rich` 重构交互终端输出。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -22,10 +22,11 @@ DEEPSEEK_API_KEY=你的DeepSeek密钥
 之后每次在项目目录直接运行：
 
 ```sh
+python3 -m pip install "rich>=13.0"
 python3 -m harness
 ```
 
-启动时自动读取项目根目录 `.env`，无需每次 `export` 或安装依赖。如果当前进程已设置 `DEEPSEEK_API_KEY`，环境变量优先于文件（包括已设置的空值）。支持单行值、单／双引号、注释和可选 `export` 前缀，不执行 shell 命令或变量插值；仅读取该密钥，不注入其他变量。`.gitignore` 已排除 `.env*`，不要将真实密钥提交到 Git。
+启动时自动读取项目根目录 `.env`，无需每次 `export`。如果当前进程已设置 `DEEPSEEK_API_KEY`，环境变量优先于文件（包括已设置的空值）。支持单行值、单／双引号、注释和可选 `export` 前缀，不执行 shell 命令或变量插值；仅读取该密钥，不注入其他变量。`.gitignore` 已排除 `.env*`，不要将真实密钥提交到 Git。
 
 ```text
 你 > 帮我读取 README.md
@@ -88,6 +89,12 @@ HARNESS.md：
 ```
 
 `/notes replace --yes <text>` 替换整个文件，`/notes clear --yes` 清空文件。笔记固定指向会话工作区根目录的 `HARNESS.md`，不接收其他路径；文件最多 65536 字节，拒绝软链接、目录和二进制内容。普通追加默认放行，整篇替换需要用户确认，`deny` 规则仍可禁止。
+
+## 终端渲染
+
+交互终端使用 `rich` 渲染：AI 回答以 Markdown 面板显示，支持标题、粗体、斜体、列表、链接和代码块语法高亮；工具调用显示参数与结果摘要；用户输入、系统提示、错误、后台任务、委托和 Swarm 状态使用不同颜色。管道和非交互输出继续使用无 ANSI 的纯文本，方便脚本处理。
+
+Harness 默认强制启用交互终端颜色；管道输出不会混入终端控制序列。
 
 ## 项目配置
 
@@ -512,5 +519,7 @@ V0.5 Agent 编排离线测试通过，覆盖独立预算、后台生命周期、
 本地记忆测试通过，覆盖 JSON 持久化、最近摘要加载、删除与清空确认、退出摘要、工具结果隔离和嵌入调用默认关闭。
 
 项目笔记测试通过，覆盖 Markdown 持久化、启动注入、自动追加、整篇替换确认、路径保护和 CLI 管理。
+
+终端渲染测试通过，覆盖 Markdown 标题、代码块、列表、链接、粗斜体、工具参数与结果面板，以及交互终端和管道输出的不同行为。
 
 官方依据：[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 。

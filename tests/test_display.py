@@ -6,7 +6,7 @@ from unittest.mock import Mock, call, patch
 from harness.cli import run_cli
 from harness.client import APIError
 from harness.usage import UsageLedger
-from test_cli import CLISession, reply
+from test_cli import CLISession, reply, visible_text
 
 
 class TerminalBuffer(StringIO):
@@ -35,9 +35,10 @@ class DisplayTests(unittest.TestCase):
                 patch.object(abort, "wait", return_value=False) as wait:
             run_cli(Mock(complete=complete), input_stream=TerminalBuffer("问题\n"), output=output)
         self.assertEqual(wait.call_args_list, [call(0.02), call(0.02), call(0.02)])
-        self.assertEqual([value for value in output.writes if value in {"甲", "乙", "丙"}], ["甲", "乙", "丙"])
-        self.assertEqual(output.getvalue().count("甲乙丙"), 1)
-        self.assertNotIn("甲你 >", output.getvalue())
+        self.assertIn("甲乙丙", output.getvalue())
+        self.assertLess(output.getvalue().index("甲"), output.getvalue().index("乙"))
+        self.assertLess(output.getvalue().index("乙"), output.getvalue().index("丙"))
+        self.assertIn("Assistant", output.getvalue())
 
     def test_pipe_output_is_not_artificially_delayed(self):
         abort = Event()
@@ -51,6 +52,35 @@ class DisplayTests(unittest.TestCase):
             run_cli(Mock(complete=complete), input_stream=StringIO("问题\n"), output=output)
         wait.assert_not_called()
         self.assertEqual(output.getvalue().count("完整片段"), 1)
+
+    def test_terminal_renders_markdown_headers_code_lists_and_links(self):
+        abort = Event()
+        output = TerminalBuffer()
+        content = (
+            "# 快速排序\n\n"
+            "**平均复杂度**为 *O(n log n)*。\n\n"
+            "```python\n"
+            "def quicksort(items):\n"
+            "    return items\n"
+            "```\n\n"
+            "- 稳定排序\n"
+            "- 原地排序\n\n"
+            "[官方文档](https://example.com)"
+        )
+
+        def complete(**request):
+            request["on_text"](content)
+            return reply(content)
+
+        with patch("harness.cli.Event", return_value=abort), \
+                patch.object(abort, "wait", return_value=False):
+            run_cli(Mock(complete=complete), input_stream=TerminalBuffer("请解释\n"), output=output)
+        text = visible_text(output.getvalue())
+        self.assertIn("快速排序", text)
+        self.assertIn("平均复杂度", text)
+        self.assertIn("def quicksort", text)
+        self.assertIn("稳定排序", text)
+        self.assertIn("官方文档", text)
 
     def test_cost_and_exit_are_responsive_while_character_delay_is_waiting(self):
         abort = Event()
@@ -88,7 +118,7 @@ class DisplayTests(unittest.TestCase):
                 release.set()
                 workers[0].join(timeout=3)
                 self.assertFalse(workers[0].is_alive())
-                self.assertIn("DeepSeek > 甲", session.output.getvalue())
+                self.assertIn("甲", session.output.getvalue())
                 self.assertNotIn("乙", session.output.getvalue())
                 self.assertEqual(session.errors.getvalue(), "")
             finally:

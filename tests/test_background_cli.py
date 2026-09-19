@@ -43,12 +43,12 @@ class BackgroundCLITests(unittest.TestCase):
             terminal=True, character_delay=0,
         )
         try:
-            self.assertTrue(session.output.wait_for("DeepSeek > 已提交，先继续说明项目结构。"))
+            self.assertTrue(session.output.wait_for("已提交，先继续说明项目结构。"))
             self.assertTrue(session.output.wait_for("[background] 任务 #1 已提交：运行测试"))
             self.assertTrue(session.output.wait_for("[background] 任务 #1：状态 RUNNING"))
             self.assertTrue(session.output.wait_for("[background] 任务 #1：已完成"))
             session.input.send("测试跑完了吗？\n")
-            self.assertTrue(session.output.wait_for("DeepSeek > 测试已完成，12 passed, 0 failed。"))
+            self.assertTrue(session.output.wait_for("测试已完成，12 passed, 0 failed。"))
             session.close()
             output = session.output.getvalue()
             self.assertIn("[background] 任务 #1：已完成（耗时", output)

@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出，支持 Markdown、代码高亮和彩色信息。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.6 — Add-记忆系统](https://github.com/MichaelJiangg/harness/releases/tag/v0.6) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.6`。
+最近公开版本为 [V0.6.1 — 美化样式](https://github.com/MichaelJiangg/harness/releases/tag/v0.6.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.6.1`。
 
 ## 已完成
 
@@ -101,6 +101,7 @@
 - 新增 `harness/memory/` 包：`session.py` 管理当前工作区的 `.harness/memory.json`，保存最多 20 条会话摘要并在正常 `/exit` 或输入结束时调用 DeepSeek 提取本次摘要；`injection.py` 把最近 5 条作为背景上下文注入系统提示，摘要请求不携带工具结果正文。
 - CLI 新增 `/memory list|show|delete --yes|clear --yes`；删除和清空要求显式 `--yes`。记忆文件损坏时警告并继续运行，保存失败不阻止退出，摘要模型请求仍计入同一用量账本。
 - 记忆默认只在 `python3 -m harness` 入口启用，`run_cli` 嵌入调用保持关闭，避免现有测试和第三方嵌入在退出时产生额外请求。
+- CLI 输出接入 `rich>=13.0`：AI 回复使用 Markdown 面板、代码语法高亮和彩色标题，工具调用面板展示参数与结果摘要，系统、错误、后台、委托和 Swarm 状态使用不同颜色；管道模式继续输出无 ANSI 文本。
 - 新增 `harness/notes.py` 和工作区根目录 `HARNESS.md`：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换长期项目知识；固定单文件、最多 65536 字节，拒绝软链接、目录和二进制内容。
 - CLI 新增 `/notes`、`/notes append <text>`、`/notes replace --yes <text>` 和 `/notes clear --yes`；追加默认放行，整篇替换默认询问，`deny` 始终优先。项目笔记默认只在 CLI 启动入口启用。
 
@@ -121,6 +122,7 @@
 
 ## 最近验证
 
+- 2026-09-20：终端渲染重构后全量 548 项离线测试通过；新增 Markdown 标题、代码块、列表、链接和粗斜体渲染回归，更新 Bash、写入、委托和权限 CLI 终端断言以兼容 Rich ANSI 输出。`python3 -m compileall -q harness tests` 与 `git diff --check` 通过；未调用真实 DeepSeek API。
 - 2026-09-20：V0.6 已通过 GitHub API 发布。发布目标提交为 `31b92bcc50820a8c404f08d8c08104ecada185dc`，注解标签对象为 `b5772e917db5c04c20d64b032e90b0b8cc47f1dc`，标签 `v0.6` 指向该提交；Release「V0.6 - Add-记忆系统」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致，发布清单不包含 `.env`、日志、缓存或本地记忆文件；发布核验文档随后提交到 `main`，不改变标签目标。
 - 2026-09-20：记忆核心拆分为 `harness/memory/session.py` 和 `harness/memory/injection.py`；新增 `tests/test_memory.py` 和 `tests/test_notes.py`，覆盖 JSON 记忆、最近 5 条上下文、模型摘要、工具结果隔离、HARNESS.md 持久化、启动注入、自动追加、替换确认、路径保护、不可信字段清理和嵌入默认关闭。全部 547 项离线测试通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
 - 2026-09-20：执行 `python3 -m unittest discover -s tests -q`，522 项全部通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。新增 auto 模式管道、重定向、heredoc 和验证脚本放行回归；使用模拟模型和临时文件，未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。

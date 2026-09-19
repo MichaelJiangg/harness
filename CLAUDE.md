@@ -8,7 +8,7 @@
 
 ## 技术与目录约定
 
-- 使用 Python 3.11 或更新版本和标准库，以 `tomllib` 解析 TOML，当前阶段不引入第三方运行依赖。
+- 使用 Python 3.11 或更新版本；查询循环、文件与命令工具、记忆和笔记核心使用标准库，终端渲染依赖 `rich>=13.0`。
 - `pyproject.toml` 是项目元信息及非密钥运行配置的唯一默认值来源，涵盖模型、显示、请求与重试、上下文、工具限制、费用与权限。`harness/config.py` 严格校验并缓存启动配置，文件位置固定在 Harness 项目根目录，不跟随被操作的工作目录；配置缺失或无效时明确报错，不静默放宽权限。密钥继续由 `.env` 或环境变量提供。
 - `harness/permissions.py` 统一执行 `allow`、`ask`、`deny` 决策。`PermissionRule` 提供精确工具名、`action`、整数 `priority`（默认 0），以及可选 `directory` 或 `command_pattern`；配置放在 `tool.harness.permissions.rules`。工具级 `deny` 先拒绝，规则列表按禁止规则优先、数值优先级降序、同级声明顺序排列；`check_permission` 逐条匹配，第一条命中即返回，没有命中则沿用工具级配置及风险等级默认策略。未配置的新工具默认询问。
 - `PermissionPolicy` 增加会话模式 `ask`／`auto` 和 `auto_directories`。`auto` 模式信任当前工作目录或指定相对目录，自动放行读取、写入、验证、常见 Node/Python/Perl 脚本，以及安全的管道、`2>&1`、`2>/dev/null`、`$(pwd)` 和 heredoc 脚本；`deny` 始终优先，网络、破坏性命令、进程管理、敏感路径、越界和任意重定向仍须确认。
@@ -44,6 +44,7 @@
 - 记忆默认只在 `python3 -m harness` 的 CLI 启动入口启用，`run_cli` 嵌入调用默认保持关闭，避免测试或第三方嵌入在退出时产生意外的模型请求。
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
+- CLI 交互终端输出统一由 `rich` 负责：AI 回答使用 Markdown 面板和代码语法高亮，工具调用展示参数与结构摘要，系统、错误、后台、委托和 Swarm 状态分层配色；管道输出保持无 ANSI 的纯文本。工具事件可携带脱敏参数供终端显示，但不能向模型或日志放宽权限。
 - `tests/`：使用 `unittest` 验证行为，默认不访问真实 DeepSeek API。
 - `README.md`：启动方法、配置、行为和限制。
 - `ROADMAP.md`：当前阶段、完成项、待办、阻塞和最近验证。

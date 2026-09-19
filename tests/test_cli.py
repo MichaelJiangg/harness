@@ -3,6 +3,7 @@ from io import StringIO
 import os
 from pathlib import Path
 from queue import Queue
+import re
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -15,6 +16,13 @@ from harness.client import DEFAULT_MODEL
 from harness.engine import query_loop
 from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
+
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def visible_text(value):
+    return ANSI_ESCAPE.sub("", value)
 
 
 def reply(content="回答完成。", *, prompt=10, completion=5, hit=2, tool_calls=None):
@@ -65,8 +73,9 @@ class QueuedInput:
 
 
 class ObservableOutput(StringIO):
-    def __init__(self):
+    def __init__(self, *, strip_ansi=False):
         super().__init__()
+        self.strip_ansi = strip_ansi
         self.changed = Condition()
 
     def write(self, value):
@@ -79,11 +88,15 @@ class ObservableOutput(StringIO):
         with self.changed:
             return self.changed.wait_for(lambda: text in self.getvalue(), timeout=3)
 
+    def getvalue(self):
+        value = super().getvalue()
+        return visible_text(value) if self.strip_ansi else value
+
 
 class CLISession:
     def __init__(self, client, *, ledger=None, lines=(), terminal=False, character_delay=0.02):
         self.input = QueuedInput(*lines)
-        self.output = ObservableOutput()
+        self.output = ObservableOutput(strip_ansi=terminal)
         self.input.isatty = lambda: terminal
         self.output.isatty = lambda: terminal
         self.errors = StringIO()

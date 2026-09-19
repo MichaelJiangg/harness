@@ -135,6 +135,10 @@ def query_loop(state):
         for call in tool_calls:
             if state.abort.is_set():
                 raise QueryAborted("查询已停止。")
+            try:
+                display_arguments = json.loads(call["function"]["arguments"])
+            except json.JSONDecodeError:
+                display_arguments = {}
             result = _execute_call(state, call)
             if (call["function"]["name"] == "read_file" and result.get("status") == "success"
                     and isinstance(result.get("path"), str) and type(result.get("eof")) is bool
@@ -151,7 +155,10 @@ def query_loop(state):
             displayed_result = result if original_chars <= state.tool_result_limit else {
                 "message": f"结果过长，已截断（原 {original_chars} 字符，保留 {len(content)} 字符）。",
             }
-            state.on_event({"type": "tool", "name": call["function"]["name"], "result": displayed_result})
+            state.on_event({
+                "type": "tool", "name": call["function"]["name"],
+                "arguments": display_arguments, "result": displayed_result,
+            })
 
     raise QueryAborted("查询已停止。")
 

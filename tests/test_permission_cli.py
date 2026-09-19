@@ -7,7 +7,7 @@ import unittest
 from harness.permissions import PermissionPolicy
 from harness.tools import ToolRegistry, create_tool_executor
 from harness.tools.definition import ToolDefinition
-from test_cli import CLISession, reply
+from test_cli import CLISession, reply, visible_text
 
 
 class PermissionCLITests(unittest.TestCase):
@@ -56,11 +56,12 @@ class PermissionCLITests(unittest.TestCase):
         session, client = self.start(twice=True)
         self.assertTrue(session.output.wait_for("[确认] 输入 y 批准本次工具调用"))
         self.handler.assert_not_called()
-        self.assertIn("[工具确认] example", session.output.getvalue())
-        self.assertIn("风险等级：中风险", session.output.getvalue())
-        self.assertNotIn("高风险操作警告", session.output.getvalue())
-        self.assertIn('"value": "中文\\u001b[31m"', session.output.getvalue())
-        self.assertNotIn("\u001b", session.output.getvalue())
+        output = visible_text(session.output.getvalue())
+        self.assertIn("[工具确认] example", output)
+        self.assertIn("风险等级：中风险", output)
+        self.assertNotIn("高风险操作警告", output)
+        self.assertIn('"value": "中文\\u001b[31m"', output)
+        self.assertNotIn("\u001b", output)
         session.input.send("/cost\n")
         self.assertTrue(session.output.wait_for("模型请求：1 次。"))
         session.input.send("y\n")

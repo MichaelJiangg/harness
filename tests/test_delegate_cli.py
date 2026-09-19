@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from harness.engine import query_loop
 from harness.usage import UsageLedger
-from test_cli import CLISession, reply
+from test_cli import CLISession, reply, visible_text
 
 
 def tool_call(name, arguments, call_id):
@@ -63,14 +63,15 @@ class DelegateCLITests(unittest.TestCase):
             reply(None, tool_calls=[self.delegate]), reply(None, tool_calls=[self.read]),
             self.streamed(child_report), self.streamed("主 AI 汇总完成。"),
         ])
-        self.assertTrue(session.output.wait_for("DeepSeek > 主 AI 汇总完成。"))
+        self.assertTrue(session.output.wait_for("主 AI 汇总完成。"))
         session.input.send("/cost\n")
         self.assertTrue(session.output.wait_for("模型请求：4 次。"))
         session.close()
-        output = session.output.getvalue()
+        output = visible_text(session.output.getvalue())
         self.assertIn("[delegate] 启动子任务：检查测试文件", output)
         self.assertIn("[delegate] 子任务完成，返回结果：检查测试文件", output)
-        self.assertIn("[delegate] [工具] read_file：已读取文件", output)
+        self.assertIn("read_file", output)
+        self.assertIn("已读取文件（15 字符）。 本页已到文件末尾。", output)
         self.assertIn("[delegate] [请求 #2／对话 1]", output)
         self.assertIn("[delegate] [请求 #3／对话 1]", output)
         self.assertEqual(output.count("主 AI 汇总完成。"), 1)
@@ -113,7 +114,7 @@ class DelegateCLITests(unittest.TestCase):
             self.assertNotIn("子任务完成，返回结果", session.output.getvalue())
             self.assertNotIn("DeepSeek >", session.output.getvalue())
             release.set()
-            self.assertTrue(session.output.wait_for("DeepSeek > 等待后主回答完成。"))
+            self.assertTrue(session.output.wait_for("等待后主回答完成。"))
             self.assertEqual(self.ledger.summary()["requests"], 4)
             self.assertEqual(session.errors.getvalue(), "")
         finally:
@@ -165,7 +166,7 @@ class DelegateCLITests(unittest.TestCase):
         session, _ = self.start([
             reply(None, tool_calls=[self.delegate]), failed_child, self.streamed("主 AI 已说明子任务失败。"),
         ])
-        self.assertTrue(session.output.wait_for("DeepSeek > 主 AI 已说明子任务失败。"))
+        self.assertTrue(session.output.wait_for("主 AI 已说明子任务失败。"))
         session.close()
         self.assertIn("[delegate] 子任务失败：检查测试文件；", session.output.getvalue())
         self.assertNotIn("private child failure", session.output.getvalue())
@@ -199,7 +200,7 @@ class DelegateCLITests(unittest.TestCase):
             session, _ = self.start([])
             self.assertTrue(session.output.wait_for("[delegate] 子任务失败："))
             session.close()
-        output = session.output.getvalue()
+        output = visible_text(session.output.getvalue())
         self.assertEqual(output.count("主流回答。"), 1)
         self.assertNotIn("隐藏的子流", output)
         for control in ("\x1b", "\r", "\u202e"):
