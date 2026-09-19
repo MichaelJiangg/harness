@@ -123,6 +123,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.6.2 已发布。远端 `main` 提交为 `1014d76d0ea805612177e8b2d9f982fda33e940e`，注解标签对象为 `3c6d135538c15b257b8f4aaf2fec904968e9d8a3`，标签 `v0.6.2` 指向该提交；Release「V0.6.2 - 优化启动页」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：启动页文案精简后全量 548 项离线测试通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。
 - 2026-09-20：V0.6.1 已发布。远端 `main` 提交为 `ad96b41f6e34916d6ddc3017314ec4938ec5d35b`，注解标签对象为 `b7fcd38dec55e4adb3f7347f71a86214376b148e`，标签 `v0.6.1` 指向该提交；Release「V0.6.1 - 美化样式」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：终端渲染重构后全量 548 项离线测试通过；新增 Markdown 标题、代码块、列表、链接和粗斜体渲染回归，更新 Bash、写入、委托和权限 CLI 终端断言以兼容 Rich ANSI 输出。`python3 -m compileall -q harness tests` 与 `git diff --check` 通过；未调用真实 DeepSeek API。
