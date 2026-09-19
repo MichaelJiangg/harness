@@ -121,6 +121,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.6 已通过 GitHub API 发布。远端 `main` 提交为 `31b92bcc50820a8c404f08d8c08104ecada185dc`，注解标签对象为 `b5772e917db5c04c20d64b032e90b0b8cc47f1dc`，标签 `v0.6` 指向该提交；Release「V0.6 - Add-记忆系统」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致，发布清单不包含 `.env`、日志、缓存或本地记忆文件。
 - 2026-09-20：记忆核心拆分为 `harness/memory/session.py` 和 `harness/memory/injection.py`；新增 `tests/test_memory.py` 和 `tests/test_notes.py`，覆盖 JSON 记忆、最近 5 条上下文、模型摘要、工具结果隔离、HARNESS.md 持久化、启动注入、自动追加、替换确认、路径保护、不可信字段清理和嵌入默认关闭。全部 547 项离线测试通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
 - 2026-09-20：执行 `python3 -m unittest discover -s tests -q`，522 项全部通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。新增 auto 模式管道、重定向、heredoc 和验证脚本放行回归；使用模拟模型和临时文件，未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
 - 2026-09-20：执行 `python3 -m unittest discover -s tests -q`，521 项全部通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。新增 ask／auto 权限模式、信任目录校验、危险操作保护和 CLI 模式切换回归；使用模拟模型和临时文件，未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
