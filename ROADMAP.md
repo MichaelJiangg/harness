@@ -122,6 +122,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.6.1 已发布。远端 `main` 提交为 `ad96b41f6e34916d6ddc3017314ec4938ec5d35b`，注解标签对象为 `b7fcd38dec55e4adb3f7347f71a86214376b148e`，标签 `v0.6.1` 指向该提交；Release「V0.6.1 - 美化样式」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：终端渲染重构后全量 548 项离线测试通过；新增 Markdown 标题、代码块、列表、链接和粗斜体渲染回归，更新 Bash、写入、委托和权限 CLI 终端断言以兼容 Rich ANSI 输出。`python3 -m compileall -q harness tests` 与 `git diff --check` 通过；未调用真实 DeepSeek API。
 - 2026-09-20：V0.6 已通过 GitHub API 发布。发布目标提交为 `31b92bcc50820a8c404f08d8c08104ecada185dc`，注解标签对象为 `b5772e917db5c04c20d64b032e90b0b8cc47f1dc`，标签 `v0.6` 指向该提交；Release「V0.6 - Add-记忆系统」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致，发布清单不包含 `.env`、日志、缓存或本地记忆文件；发布核验文档随后提交到 `main`，不改变标签目标。
 - 2026-09-20：记忆核心拆分为 `harness/memory/session.py` 和 `harness/memory/injection.py`；新增 `tests/test_memory.py` 和 `tests/test_notes.py`，覆盖 JSON 记忆、最近 5 条上下文、模型摘要、工具结果隔离、HARNESS.md 持久化、启动注入、自动追加、替换确认、路径保护、不可信字段清理和嵌入默认关闭。全部 547 项离线测试通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。未读取／修改实际 `.env`、未调用真实 DeepSeek API、未推送或发布。
