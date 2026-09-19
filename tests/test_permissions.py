@@ -89,7 +89,7 @@ class PermissionExecutionTests(unittest.TestCase):
             ("read_file", {"path": "main.py"}),
             ("grep", {"keyword": "needle"}),
             ("write_file", {"path": "created/note.txt", "content": "正文"}),
-            ("bash", {"command": "printf denied"}),
+            ("bash", {"command": "touch denied.txt"}),
         ]
         with patch("pathlib.Path.open") as open_file, patch("subprocess.Popen") as popen:
             for name, arguments in calls:
@@ -106,7 +106,7 @@ class PermissionExecutionTests(unittest.TestCase):
         with patch("subprocess.Popen") as popen:
             for name, arguments in (
                 ("write_file", {"path": "created/note.txt", "content": "正文"}),
-                ("bash", {"command": "printf denied"}),
+                ("bash", {"command": "touch denied.txt"}),
             ):
                 with self.subTest(name=name):
                     self.assertEqual(self.execute(name, arguments, permissions=policy)["code"],

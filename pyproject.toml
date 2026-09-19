@@ -1,6 +1,6 @@
 [project]
 name = "harness"
-version = "0.4.0"
+version = "0.5.0"
 description = "A Python query engine with DeepSeek and a local tool system."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,15 +23,26 @@ max_retries = 3
 retry_initial_delay = 1.0
 retry_backoff = 2.0
 
+[tool.harness.background]
+max_concurrent = 5
+default_timeout = 300
+
+[tool.harness.swarm]
+max_requests = 120
+max_role_requests = 40
+
 [tool.harness.context]
-max_chars = 24000
+max_chars = 64000
 summary_chars = 2000
 keep_recent_turns = 4
-max_compactions = 2
-tool_result_chars = 6000
+max_compactions = 6
+tool_result_chars = 12000
 
 [tool.harness.tools]
 file_max_bytes = 1048576
+
+[tool.harness.tools.read_file]
+page_lines = 200
 
 [tool.harness.tools.bash]
 default_timeout = 30
@@ -60,7 +71,7 @@ input_miss_per_million = 0.30
 output_per_million = 1.2
 
 [tool.harness.permissions]
-allow = ["read_file", "grep"]
+allow = ["read_file", "grep", "delegate"]
 ask = ["write_file"]
 deny = []
 rules = []

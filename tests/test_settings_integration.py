@@ -45,11 +45,11 @@ class SettingsIntegrationTests(unittest.TestCase):
             ('max_retries = 3', 'max_retries = 2'),
             ('retry_initial_delay = 1.0', 'retry_initial_delay = 0.25'),
             ('retry_backoff = 2.0', 'retry_backoff = 3.0'),
-            ('max_chars = 24000', 'max_chars = 9000'),
+            ('max_chars = 64000', 'max_chars = 9000'),
             ('summary_chars = 2000', 'summary_chars = 600'),
             ('keep_recent_turns = 4', 'keep_recent_turns = 1'),
-            ('max_compactions = 2', 'max_compactions = 1'),
-            ('tool_result_chars = 6000', 'tool_result_chars = 6500'),
+            ('max_compactions = 6', 'max_compactions = 1'),
+            ('tool_result_chars = 12000', 'tool_result_chars = 6500'),
             ('input_miss_per_million = 0.15', 'input_miss_per_million = 2.0'),
             ('peak_weekdays = [0, 1, 2, 3, 4]', 'peak_weekdays = [6]'),
             ('peak_hours_utc = [[1, 4], [6, 10]]', 'peak_hours_utc = [[12, 13]]'),
@@ -88,6 +88,7 @@ class SettingsIntegrationTests(unittest.TestCase):
             assert (state.model, state.max_requests, state.max_retries) == ("integration-model", 7, 2)
             assert (state.context_limit, state.summary_limit, state.keep_recent_turns,
                     state.max_compactions, state.tool_result_limit) == (9000, 600, 1, 1, 6500)
+            assert (state.swarm_max_requests, state.swarm_max_role_requests) == (120, 40)
             state.messages.append({"role": "user", "content": "继续"})
             assert query_loop(state) == "完成"
             assert abort.waits == [0.25, 0.75]
@@ -129,7 +130,8 @@ class SettingsIntegrationTests(unittest.TestCase):
                 self.assertNotIn("DEEPSEEK_API_KEY", result.stderr)
 
     def test_help_uses_configuration_without_loading_real_credentials(self):
-        self.write_config([('default_timeout = 30', 'default_timeout = 9'),
+        self.write_config([('[tool.harness.tools.bash]\ndefault_timeout = 30',
+                           '[tool.harness.tools.bash]\ndefault_timeout = 9'),
                            ('max_timeout = 120', 'max_timeout = 15')])
         result = subprocess.run([sys.executable, "-m", "harness", "--help"], cwd=self.root,
                                 env=self.environ, text=True, capture_output=True, timeout=10)

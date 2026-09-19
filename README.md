@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+，仅使用标准库，零第三方运行依赖。
 
-最近发布：**V0.4 — Add-Permission System**（Git 标签 `v0.4`）。新增可配置权限规则、Bash 风险检测、会话目录授权和脱敏审计，项目配置集中到 `pyproject.toml`。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.5 — Add-Agent 编排**（Git 标签 `v0.5`）。新增独立委托、后台任务、多角色 Swarm 协作和受限验证工具，继续沿用 V0.4 权限系统。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -58,6 +58,8 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `[tool.harness.model]` | 模型名称、HTTPS 接口地址、请求超时 |
 | `[tool.harness.display]` | 逐字显示间隔，`character_delay = 0.02` 表示 20 毫秒 |
 | `[tool.harness.engine]` | 请求上限、重试次数、首次等待与递增倍数 |
+| `[tool.harness.background]` | 后台任务并发上限与默认超时 |
+| `[tool.harness.swarm]` | Swarm 团队总请求上限与单角色请求上限 |
 | `[tool.harness.context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
 | `[tool.harness.tools]` 及其 `bash`、`grep` 子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
 | `[tool.harness.pricing]` 及其 `peak` 子表 | 现有费率、币种、核验信息及 UTC 高峰时段 |
@@ -197,7 +199,7 @@ print(query_loop(state))
 - 一次返回多个工具调用时，逐个执行并回传所有结果。即使回复附带文字，也会优先处理其中的工具调用。
 - 工具名称和参数分片先拼接完整，再交给原有工具循环；token 用量从末尾流式数据读取，每次请求只记录一次。
 - 每次模型请求都记录用量；一次用户提问可能产生多次模型请求。
-- 当前开放只读的 `read_file`、`grep`，默认需确认且可按目录授权的 `write_file`，以及按命令风险决定确认的 `bash`；工具描述随每次正常模型请求发送。
+- 当前开放只读的 `read_file`、`grep`、`background_check`，默认需确认且可按目录授权的 `write_file`、按命令风险决定确认的 `bash`、受限验证 `run_verify`、后台任务提交 `background_submit`、多角色团队协作 `swarm`，以及独立子任务 `delegate`；工具描述随每次正常模型请求发送。
 - 未知工具、参数错误与执行器错误转成工具结果，交给模型决定下一步。
 - 一次用户提问或手动压缩最多实际请求模型 20 次，包含摘要和重试，每次请求超时为 120 秒；截断、空回答或循环达到上限均报错，不当作完成。
 - 查询失败时保留已产生的用量，但不将未完成的对话加入后续历史。
@@ -217,7 +219,12 @@ harness/tools/
 ├── read_file.py     # 读文件的定义与具体实现
 ├── write_file.py    # 写文件的定义与具体实现
 ├── bash.py          # 命令执行、超时清理和两路输出收集
-└── grep.py          # 关键词搜索、文件名筛选和结果限长
+├── grep.py          # 关键词搜索、文件名筛选和结果限长
+├── delegate.py      # 独立子任务
+├── background_submit.py  # 后台任务提交
+├── background_check.py   # 后台任务状态查询
+├── run_verify.py    # 受限 Node／Python 验证
+└── swarm.py         # 多角色团队协作
 ```
 
 每个工具模块提供 `DEFINITION = ToolDefinition(...)`：
@@ -336,6 +343,20 @@ harness/tools/
 
 进程管理采用 Python 标准库的 [subprocess](https://docs.python.org/3/library/subprocess.html) 和 [os.killpg](https://docs.python.org/3/library/os.html#os.killpg) 。
 
+## Agent 编排
+
+V0.5 提供三种编排方式：
+
+| 工具 | 用途 |
+| --- | --- |
+| `delegate` | 启动同步独立子查询，完成后把报告交给主 AI |
+| `background_submit` | 把慢任务提交到会话级后台队列，之后用 `background_check` 查询 |
+| `swarm` | 让多个角色按交接协议接力，例如 Coder、Reviewer、Tester |
+
+委托和 Swarm 角色拥有独立上下文，只继承当前会话可见工具及权限、确认、审计和工作区。后台 Bash 任务支持最多 5 个并发、默认 300 秒超时；后台分析使用独立请求预算。Swarm 默认团队总预算 120 次、单角色 40 次，主查询自己的 20 次额度不共享。
+
+`run_verify` 用于运行工作区内明确存在的验证脚本，支持 `node`、`python3`、`unittest`、`node-test`、`npm-test`。首次批准某目录后，当前会话内同目录及子目录的验证复用授权；写文件和危险 Bash 仍逐次确认。
+
 ## 上下文压缩与工具结果限制
 
 | 规则 | 默认值与行为 |
@@ -401,6 +422,8 @@ harness/tools/
 | `harness/audit.py` | 脱敏权限审计、私有日志写入与失败反馈 |
 | `harness/client.py` | DeepSeek HTTP 请求、超时与错误分类 |
 | `harness/engine.py` | 查询循环、有限重试、摘要压缩与逐次记账 |
+| `harness/orchestration.py` | 独立委托、后台分析和 Swarm 角色编排 |
+| `harness/background.py` | 后台任务状态、排队、并发限制与超时 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
 | `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |
 | `harness/tools/registry.py` | 自动发现、注册和查找工具，生成描述列表 |
@@ -409,6 +432,11 @@ harness/tools/
 | `harness/tools/write_file.py` | 确认后写入 UTF-8 文本、创建父目录及路径限制 |
 | `harness/tools/bash.py` | 受控环境运行命令、超时与取消清理、双路输出与退出码 |
 | `harness/tools/grep.py` | 关键词搜索、文件名模式筛选、行号与内容回传及结果限长 |
+| `harness/tools/delegate.py` | 独立子任务 Schema 与运行入口 |
+| `harness/tools/background_submit.py` | 后台命令或后台分析的提交入口 |
+| `harness/tools/background_check.py` | 后台任务状态与结果查询 |
+| `harness/tools/run_verify.py` | 工作区内 Node／Python 验证脚本运行入口 |
+| `harness/tools/swarm.py` | 多角色团队协作 Schema 与默认团队 |
 | `harness/usage.py` | 逐请求 token 记录、模型费率与费用汇总 |
 | `harness/cli.py` | 终端输入、回答和斜杠命令 |
 | `tests/` | 模拟接口、工具、计费与 CLI 测试 |
@@ -419,8 +447,10 @@ harness/tools/
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖纯文字回答、多工具与多轮调用、临时文件读写及错误恢复、关键词与文件类型搜索、行号及完整条目截断、写入和命令预览与逐次确认、拒绝和取消、命令两路输出与退出码、超时及同组进程清理、路径与软链接限制、连续对话、压缩与回滚、工具结果限长、递增重试与取消、限速显示、请求上限、token 和峰谷费用、`/cost`、`/compact`、启动及 `.env` 加载行为。文件和命令测试使用临时目录及无害本地子进程，接口与配置测试使用模拟内容，不读取实际密钥、不产生真实 API 费用。真实 API 联调尚未验证。
+测试覆盖纯文字回答、多工具与多轮调用、委托与子查询、后台任务排队与跨轮查询、Swarm 多角色交接与回退、受限验证脚本、临时文件读写及错误恢复、关键词与文件类型搜索、行号及完整条目截断、写入和命令预览与逐次确认、拒绝和取消、命令两路输出与退出码、超时及同组进程清理、路径与软链接限制、连续对话、压缩与回滚、工具结果限长、递增重试与取消、限速显示、请求上限、token 和峰谷费用、`/cost`、`/compact`、启动及 `.env` 加载行为。文件和命令测试使用临时目录及无害本地子进程，接口与配置测试使用模拟内容，不读取实际密钥、不产生真实 API 费用。真实 API 联调尚未验证。
 
 V0.4 权限离线测试通过，覆盖规则冲突与路径边界、五类 Bash 风险信号、环境清理、会话授权复用与隔离、禁止优先、拒绝说明，以及审计脱敏、特殊文件拒绝和日志故障时阻止执行。
+
+V0.5 Agent 编排离线测试通过，覆盖独立预算、后台生命周期、Swarm 交接和受限验证目录授权。
 
 官方依据：[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 。

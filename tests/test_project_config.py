@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.4.0")
+        self.assertEqual(project["version"], "0.5.0")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], [])
         self.assertEqual(project["readme"], "README.md")
@@ -54,18 +54,21 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(settings["engine"], {
             "max_requests": 20, "max_retries": 3, "retry_initial_delay": 1.0, "retry_backoff": 2.0,
         })
+        self.assertEqual(settings["background"], {"max_concurrent": 5, "default_timeout": 300})
+        self.assertEqual(settings["swarm"], {"max_requests": 120, "max_role_requests": 40})
         self.assertEqual(settings["context"], {
-            "max_chars": 24000, "summary_chars": 2000, "keep_recent_turns": 4,
-            "max_compactions": 2, "tool_result_chars": 6000,
+            "max_chars": 64000, "summary_chars": 2000, "keep_recent_turns": 4,
+            "max_compactions": 6, "tool_result_chars": 12000,
         })
         self.assertEqual(settings["tools"], {
             "file_max_bytes": 1048576,
+            "read_file": {"page_lines": 200},
             "bash": {"default_timeout": 30, "max_timeout": 120, "max_output_bytes": 65536},
             "grep": {"default_max_results": 100, "max_results": 500,
                      "max_line_chars": 500, "max_result_chars": 5500},
         })
         self.assertEqual(settings["permissions"], {
-            "allow": ["read_file", "grep"], "ask": ["write_file"], "deny": [], "rules": [],
+            "allow": ["read_file", "grep", "delegate"], "ask": ["write_file"], "deny": [], "rules": [],
         })
 
     def test_initial_rates_and_peak_periods_are_preserved(self):
@@ -84,7 +87,9 @@ class ProjectConfigTests(unittest.TestCase):
             ('name = "deepseek-flash"', 'name = "custom-model"'),
             ("character_delay = 0.02", "character_delay = 0.04"),
             ("max_requests = 20", "max_requests = 7"),
-            ("default_timeout = 30", "default_timeout = 10"),
+            ("max_concurrent = 5", "max_concurrent = 2"),
+            ("[tool.harness.tools.bash]\ndefault_timeout = 30",
+             "[tool.harness.tools.bash]\ndefault_timeout = 10"),
             ("default_max_results = 100", "default_max_results = 5"),
             ("deny = []", 'deny = ["bash"]'),
         )
@@ -92,6 +97,7 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(settings["model"]["name"], "custom-model")
         self.assertEqual(settings["display"]["character_delay"], 0.04)
         self.assertEqual(settings["engine"]["max_requests"], 7)
+        self.assertEqual(settings["background"]["max_concurrent"], 2)
         self.assertEqual(settings["tools"]["bash"]["default_timeout"], 10)
         self.assertEqual(settings["tools"]["grep"]["default_max_results"], 5)
         self.assertEqual(settings["permissions"]["deny"], ["bash"])
@@ -134,13 +140,15 @@ class ProjectConfigTests(unittest.TestCase):
                     self.load_document(settings)
 
     def test_missing_nested_field_is_rejected(self):
-        settings = deepcopy(self.defaults)
-        del settings["tools"]["bash"]["max_timeout"]
-        with self.assertRaisesRegex(ValueError, "tool.harness.tools.bash"):
-            self.load_document(settings)
+        for section, field in (("bash", "max_timeout"), ("read_file", "page_lines")):
+            with self.subTest(section=section):
+                settings = deepcopy(self.defaults)
+                del settings["tools"][section][field]
+                with self.assertRaisesRegex(ValueError, f"tool.harness.tools.{section}"):
+                    self.load_document(settings)
 
     def test_unknown_fields_and_secret_fields_are_rejected_without_echoing_keys(self):
-        for section in ((), ("model",), ("tools", "bash"), ("permissions",)):
+        for section in ((), ("model",), ("tools", "bash"), ("tools", "read_file"), ("permissions",)):
             with self.subTest(section=section):
                 settings = deepcopy(self.defaults)
                 target = settings
@@ -163,9 +171,12 @@ class ProjectConfigTests(unittest.TestCase):
             ("model", "request_timeout"), ("display", "character_delay"),
             ("engine", "max_requests"), ("engine", "max_retries"),
             ("engine", "retry_initial_delay"), ("engine", "retry_backoff"),
+            ("background", "max_concurrent"), ("background", "default_timeout"),
+            ("swarm", "max_requests"), ("swarm", "max_role_requests"),
             ("context", "max_chars"), ("context", "summary_chars"),
             ("context", "keep_recent_turns"), ("context", "max_compactions"),
             ("context", "tool_result_chars"), ("tools", "file_max_bytes"),
+            ("tools", "read_file", "page_lines"),
             ("tools", "bash", "default_timeout"), ("tools", "bash", "max_timeout"),
             ("tools", "bash", "max_output_bytes"), ("tools", "grep", "default_max_results"),
             ("tools", "grep", "max_results"), ("tools", "grep", "max_line_chars"),
@@ -193,6 +204,7 @@ class ProjectConfigTests(unittest.TestCase):
     def test_integer_counts_reject_floats(self):
         for old, new in (("max_requests = 20", "max_requests = 20.0"),
                          ("max_retries = 3", "max_retries = 3.0"),
+                         ("page_lines = 200", "page_lines = 200.0"),
                          ("max_results = 500", "max_results = 500.0")):
             with self.subTest(old=old):
                 with self.assertRaises(ValueError):
@@ -204,15 +216,20 @@ class ProjectConfigTests(unittest.TestCase):
             ("max_retries = 3", "max_retries = 0"),
             ("retry_initial_delay = 1.0", "retry_initial_delay = 0"),
             ("keep_recent_turns = 4", "keep_recent_turns = 0"),
-            ("max_compactions = 2", "max_compactions = 0"),
+            ("max_compactions = 6", "max_compactions = 0"),
             ("input_hit_per_million = 0.003", "input_hit_per_million = 0"),
         ))
         self.assertEqual(settings["context"]["keep_recent_turns"], 0)
         self.assertEqual(settings["engine"]["max_retries"], 0)
 
     def test_timeouts_and_result_counts_obey_limits(self):
-        for old, new in (("default_timeout = 30", "default_timeout = 121"),
+        for old, new in (("[tool.harness.tools.bash]\ndefault_timeout = 30",
+                          "[tool.harness.tools.bash]\ndefault_timeout = 121"),
+                         ("[tool.harness.background]\nmax_concurrent = 5\ndefault_timeout = 300",
+                          "[tool.harness.background]\nmax_concurrent = 5\ndefault_timeout = 301"),
+                         ("max_role_requests = 40", "max_role_requests = 121"),
                          ("default_max_results = 100", "default_max_results = 501"),
+                         ("page_lines = 200", "page_lines = 0"),
                          ("request_timeout = 120", "request_timeout = 0"),
                          ("max_requests = 20", "max_requests = 0"),
                          ("retry_backoff = 2.0", "retry_backoff = 0.5")):
@@ -221,7 +238,7 @@ class ProjectConfigTests(unittest.TestCase):
                     config.load_settings(self.modified((old, new)))
 
     def test_summary_must_leave_room_in_context(self):
-        for value in (24000, 24001):
+        for value in (64000, 64001):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "摘要长度"):
                     config.load_settings(self.modified(("summary_chars = 2000", f"summary_chars = {value}")))
@@ -229,7 +246,7 @@ class ProjectConfigTests(unittest.TestCase):
     def test_result_budgets_are_compatible(self):
         for old, new in (("max_result_chars = 5500", "max_result_chars = 999"),
                          ("max_result_chars = 5500", "max_result_chars = 1000"),
-                         ("max_result_chars = 5500", "max_result_chars = 5501"),
+                         ("max_result_chars = 5500", "max_result_chars = 11501"),
                          ("max_output_bytes = 65536", "max_output_bytes = 127"),
                          ("max_line_chars = 500", "max_line_chars = 0")):
             with self.subTest(old=old):
@@ -237,7 +254,7 @@ class ProjectConfigTests(unittest.TestCase):
                     config.load_settings(self.modified((old, new)))
         settings = config.load_settings(self.modified(
             ("max_result_chars = 5500", "max_result_chars = 1000"),
-            ("tool_result_chars = 6000", "tool_result_chars = 1500"),
+            ("tool_result_chars = 12000", "tool_result_chars = 1500"),
             ("max_output_bytes = 65536", "max_output_bytes = 128"),
             ("max_line_chars = 500", "max_line_chars = 100"),
         ))

@@ -40,13 +40,23 @@ class ToolRegistryTests(unittest.TestCase):
         search_tool, search_handler = REGISTRY.get("grep")
         self.assertTrue(callable(search_handler))
         self.assertTrue(search_tool.supports_cancellation)
-        self.assertEqual(descriptions, [bash_tool.to_deepseek(), search_tool.to_deepseek(),
-                                        tool.to_deepseek(), write_tool.to_deepseek()])
+        delegate_tool, delegate_handler = REGISTRY.get("delegate")
+        self.assertTrue(callable(delegate_handler))
+        background_check_tool, _ = REGISTRY.get("background_check")
+        background_submit_tool, _ = REGISTRY.get("background_submit")
+        swarm_tool, _ = REGISTRY.get("swarm")
+        run_verify_tool, _ = REGISTRY.get("run_verify")
+        self.assertEqual(descriptions, [
+            background_check_tool.to_deepseek(), background_submit_tool.to_deepseek(),
+            bash_tool.to_deepseek(), delegate_tool.to_deepseek(), search_tool.to_deepseek(),
+            tool.to_deepseek(), run_verify_tool.to_deepseek(), swarm_tool.to_deepseek(),
+            write_tool.to_deepseek(),
+        ])
         self.assertNotIn("requires_confirmation", json.dumps(descriptions))
         self.assertNotIn("supports_cancellation", json.dumps(descriptions))
         json.dumps(descriptions)
-        descriptions[2]["function"]["parameters"]["properties"].clear()
-        self.assertIn("path", get_tool_definitions()[2]["function"]["parameters"]["properties"])
+        descriptions[5]["function"]["parameters"]["properties"].clear()
+        self.assertIn("path", get_tool_definitions()[5]["function"]["parameters"]["properties"])
         self.assertIn("path", tool.input_schema["properties"])
 
     def test_register_maps_name_to_definition_and_handler_and_rejects_duplicates(self):

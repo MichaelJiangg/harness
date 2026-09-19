@@ -79,6 +79,27 @@ definitions = {item["function"]["name"]: item["function"] for item in get_tool_d
             self.assertIn("32 字节", description)
             self.assertNotIn("1 MiB", description)
 
+    def test_read_file_default_page_lines_follow_configuration(self):
+        result = self.run_tools({"tools.read_file": {"page_lines": 2}}, r'''
+            (workspace / "notes.txt").write_text("first\nsecond\nthird\n", encoding="utf-8")
+            first = execute("read_file", {"path": "notes.txt"})
+            second = execute("read_file", {"path": "notes.txt", "offset": first["next_offset"],
+                                           "column": first["next_column"]})
+            print(json.dumps({
+                "definition": definitions["read_file"], "first": first, "second": second,
+                "explicit": execute("read_file", {"path": "notes.txt", "limit": 3}),
+            }))
+        ''')
+        self.assertEqual(result["definition"]["parameters"]["properties"]["limit"]["default"], 2)
+        self.assertEqual(result["first"]["content"], "first\nsecond\n")
+        self.assertEqual(result["first"]["next_offset"], 2)
+        self.assertEqual(result["first"]["next_column"], 0)
+        self.assertFalse(result["first"]["eof"])
+        self.assertEqual(result["second"]["content"], "third\n")
+        self.assertTrue(result["second"]["eof"])
+        self.assertEqual(result["explicit"]["content"], "first\nsecond\nthird\n")
+        self.assertTrue(result["explicit"]["eof"])
+
     def test_bash_schema_errors_and_output_limit_follow_configuration(self):
         result = self.run_tools({"tools.bash": {
             "default_timeout": 1, "max_timeout": 2, "max_output_bytes": 128,

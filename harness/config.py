@@ -89,6 +89,12 @@ _SCHEMA = {
         "max_requests": _integer(1), "max_retries": _integer(0),
         "retry_initial_delay": _number(0), "retry_backoff": _number(1),
     },
+    "background": {
+        "max_concurrent": _integer(1), "default_timeout": _integer(1),
+    },
+    "swarm": {
+        "max_requests": _integer(1), "max_role_requests": _integer(1),
+    },
     "context": {
         "max_chars": _integer(1), "summary_chars": _integer(1),
         "keep_recent_turns": _integer(0), "max_compactions": _integer(0),
@@ -96,6 +102,7 @@ _SCHEMA = {
     },
     "tools": {
         "file_max_bytes": _integer(1),
+        "read_file": {"page_lines": _integer(1)},
         "bash": {
             "default_timeout": _integer(1), "max_timeout": _integer(1),
             "max_output_bytes": _integer(128),
@@ -140,7 +147,14 @@ def load_settings(path=None):
     tool = document.get("tool")
     settings = tool.get("harness") if isinstance(tool, dict) else None
     _validate_table(settings, _SCHEMA)
-    context, bash, grep = settings["context"], settings["tools"]["bash"], settings["tools"]["grep"]
+    context, background, swarm, bash, grep = (
+        settings["context"], settings["background"], settings["swarm"],
+        settings["tools"]["bash"], settings["tools"]["grep"],
+    )
+    if background["default_timeout"] > 300:
+        raise ValueError("pyproject.toml 的后台任务默认超时不能超过 300 秒。")
+    if swarm["max_role_requests"] > swarm["max_requests"]:
+        raise ValueError("pyproject.toml 的 Swarm 单角色请求上限不能超过团队总请求上限。")
     if bash["default_timeout"] > bash["max_timeout"]:
         raise ValueError("pyproject.toml 的 Bash 默认超时不能超过最大超时。")
     if grep["default_max_results"] > grep["max_results"]:

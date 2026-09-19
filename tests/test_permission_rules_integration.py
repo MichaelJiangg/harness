@@ -229,7 +229,7 @@ class PermissionRulesIntegrationTests(unittest.TestCase):
 
     def test_unmatched_bash_still_requires_confirmation_and_obeys_rejection(self):
         rules = [{"tool": "bash", "action": "deny", "command_pattern": r"\brm\s+-rf\b"}]
-        arguments = {"command": "printf harmless"}
+        arguments = {"command": "touch harmless.txt"}
         confirm = Mock(return_value=False)
         with patch("harness.tools.bash.subprocess.Popen") as launch:
             self.assertEqual(self.executor(rules)("bash", arguments)["code"], "confirmation_required")

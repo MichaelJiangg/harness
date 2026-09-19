@@ -70,7 +70,7 @@ class BashIntegrationTests(unittest.TestCase):
         state = self.state([reply(None, [bash_call("long-command", command)]), reply("输出已截断，退出码 3。")])
         self.assertEqual(query_loop(state), "输出已截断，退出码 3。")
         message = state.client.requests[1]["messages"][-1]
-        self.assertLessEqual(len(message["content"]), 6000)
+        self.assertLessEqual(len(message["content"]), state.tool_result_limit)
         result = json.loads(message["content"])
         self.assertEqual(result["exit_code"], 3)
         self.assertEqual(result["status"], "error")
@@ -82,9 +82,10 @@ class BashIntegrationTests(unittest.TestCase):
             self.assertTrue(result[stream + "_truncated"])
 
     def test_invalid_timeout_is_returned_before_approval_then_model_can_correct_it(self):
+        command = "printf done; touch marker.txt"
         state = self.state([
-            reply(None, [bash_call("invalid-timeout", "printf done", timeout=121)]),
-            reply(None, [bash_call("valid-timeout", "printf done", timeout=1)]),
+            reply(None, [bash_call("invalid-timeout", command, timeout=121)]),
+            reply(None, [bash_call("valid-timeout", command, timeout=1)]),
             reply("已完成。"),
         ])
         self.assertEqual(query_loop(state), "已完成。")
@@ -94,7 +95,8 @@ class BashIntegrationTests(unittest.TestCase):
         valid = json.loads(state.client.requests[2]["messages"][-1]["content"])
         self.assertEqual(valid["exit_code"], 0)
         self.assertEqual(valid["stdout"], "done")
-        self.confirm.assert_called_once_with("bash", {"command": "printf done", "timeout": 1}, self.workspace)
+        self.assertTrue((self.workspace / "marker.txt").exists())
+        self.confirm.assert_called_once_with("bash", {"command": command, "timeout": 1}, self.workspace)
 
     def test_unapproved_command_never_starts(self):
         command = "printf changed > marker.txt"

@@ -6,12 +6,14 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event, Lock, Thread
 
+from .background import BackgroundManager, COMPLETED
 from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .permissions import SessionPermissionCache, get_risk_level
 from .tools import create_tool_executor
 from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
+from .tools.swarm import DEFAULT_ROLES as DEFAULT_SWARM_ROLES
 from .usage import UsageLedger, format_cost, format_usage
 
 HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工具权限由 pyproject.toml 配置。
@@ -22,6 +24,10 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 确认期间，n 或直接回车拒绝；管道模式不允许执行需要确认的工具。
 命令默认超时 {DEFAULT_TIMEOUT} 秒，最多 {MAX_TIMEOUT} 秒；以当前用户权限运行，工作目录不是文件访问沙箱。
 权限决策和确认结果记录到 .harness/permission.log，不记录正文、搜索词或原始命令。
+目录级、多文件及代码质量任务优先通过 delegate 委托独立子任务，主子请求统一计入 /cost，子任务不能递归委托。
+耗时测试、批量命令和大型独立分析可通过 background_submit 提交后台，background_check 查询状态和结果。
+多角色接力任务可通过 swarm 启动团队协作，角色拥有独立上下文并按交接协议传递成果。
+读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -39,6 +45,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     terminal = input_stream.isatty() and output.isatty()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     abort = Event()
+    background_manager = BackgroundManager(**get_settings()["background"])
+    background_default_timeout = get_settings()["background"]["default_timeout"]
     output_lock = Lock()
     confirmation_lock = Lock()
     pending_confirmation = None
@@ -69,7 +77,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     def confirm_tool(name, arguments, workspace):
         nonlocal pending_confirmation
-        label = {"write_file": "写入", "bash": "命令执行"}.get(name, "工具调用")
+        label = {
+            "write_file": "写入", "bash": "命令执行", "background_submit": "后台任务",
+            "swarm": "团队协作", "run_verify": "验证",
+        }.get(name, "工具调用")
         if not terminal:
             write(f"[确认] 非交互模式无法确认{label}，已拒绝本次操作。")
             return False
@@ -99,6 +110,52 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                         f"超时：{arguments.get('timeout', DEFAULT_TIMEOUT)} 秒\n"
                         "完整命令（控制字符转义显示，换行和制表符保留）：\n"
                         f"┌── 命令开始 ──\n{command}\n└── 命令结束 ──\n"
+                    )
+                elif name == "background_submit":
+                    background_timeout = arguments.get("timeout", background_default_timeout)
+                    if arguments.get("command") is not None:
+                        background_timeout = min(background_timeout, MAX_TIMEOUT)
+                        detail = "\n".join(
+                            "│ " + line for line in
+                            _preview_text(arguments["command"]).split("\n")
+                        )
+                        task_type = "后台 Bash 命令"
+                        block = f"完整命令（控制字符转义显示，换行和制表符保留）：\n┌── 命令开始 ──\n{detail}\n└── 命令结束 ──\n"
+                    else:
+                        detail = "\n".join(
+                            "│ " + line for line in
+                            _preview_text(arguments["task"]).split("\n")
+                        )
+                        task_type = "后台独立分析"
+                        block = f"完整任务说明：\n{detail}\n"
+                    preview = (
+                        f"\n[后台任务确认] {name}\n{risk}\n"
+                        f"描述：{_preview_text(arguments['description'], multiline=False)}\n"
+                        f"类型：{task_type}\n"
+                        f"工作目录：{_preview_text(str(workspace), multiline=False)}\n"
+                        f"超时：{background_timeout} 秒\n{block}"
+                    )
+                elif name == "swarm":
+                    role_definitions = arguments.get("roles") or DEFAULT_SWARM_ROLES
+                    role_lines = "\n".join(
+                        f"│ {role['name']}：工具 {', '.join(role.get('tools', [])) or '未指定'}，"
+                        f"可交接 {', '.join(role.get('handoff_to', [])) or '结束'}"
+                        for role in role_definitions
+                    )
+                    preview = (
+                        f"\n[团队协作确认] {name}\n{risk}\n"
+                        f"描述：{_preview_text(arguments['description'], multiline=False)}\n"
+                        f"完整任务：\n{_preview_text(arguments['task'])}\n"
+                        f"角色：\n{role_lines}\n"
+                        f"最大轮次：{arguments.get('max_rounds', 10)}\n"
+                    )
+                elif name == "run_verify":
+                    preview = (
+                        f"\n[验证确认] {name}\n{risk}\n"
+                        f"目标：{_preview_text(arguments['target'], multiline=False)}\n"
+                        f"运行方式：{arguments.get('runner', 'node')}\n"
+                        f"工作目录：{_preview_text(str(workspace), multiline=False)}\n"
+                        f"超时：{arguments.get('timeout', DEFAULT_TIMEOUT)} 秒\n"
                     )
                 else:
                     parameters = _preview_text(json.dumps(arguments, ensure_ascii=False, indent=2))
@@ -148,13 +205,63 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if request is not None:
                 request["done"].set()
 
-    tool_executor = create_tool_executor(confirm=confirm_tool, abort=abort, session_cache=SessionPermissionCache())
+    tool_executor = create_tool_executor(
+        confirm=confirm_tool, abort=abort, session_cache=SessionPermissionCache(),
+        background_manager=background_manager,
+    )
 
     def on_event(event):
         nonlocal stream_line_open, response_streamed
         if abort.is_set():
             return
-        if event["type"] == "response_start":
+        agent = event.get("agent")
+        delegated = agent == "delegate"
+        background = agent == "background"
+        swarm = agent == "swarm"
+        prefix = (
+            "[delegate] " if delegated
+            else "[background] " if background
+            else "[swarm] " if swarm
+            else ""
+        )
+        if (delegated or background or swarm) and event["type"] in {"text", "response_start"}:
+            return
+        if swarm and event["type"] in {
+            "tool", "usage", "compact_start", "compact_done", "compact_skipped", "retry",
+        }:
+            return
+        if event["type"] == "background_submitted":
+            task = event["task"]
+            write(f'[background] 任务 #{task["task_id"]} 已提交：{_preview_text(task["description"], multiline=False)}')
+        elif event["type"] == "background_started":
+            task = event["task"]
+            write(f'[background] 任务 #{task["task_id"]}：状态 {task["status"]}')
+        elif event["type"] == "background_finished":
+            task = event["task"]
+            status = "已完成" if task["status"] == COMPLETED else "已失败"
+            write(f'[background] 任务 #{task["task_id"]}：{status}（耗时 {task["elapsed"]:.1f}s）')
+        elif event["type"] == "swarm_start":
+            roles = "、".join(event.get("roles", []))
+            write(f"[swarm] 角色分配：{roles}")
+        elif event["type"] == "role_start":
+            write(f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}")
+        elif event["type"] == "role_complete":
+            write(f"[swarm] {_preview_text(event.get('description', ''), multiline=False)}")
+        elif event["type"] == "handoff":
+            write(f"[swarm] {event.get('from')} 交给 {event.get('to')}")
+        elif event["type"] == "swarm_complete":
+            write(f"[swarm] 团队协作完成（{event.get('rounds')} 轮）")
+        elif event["type"] == "swarm_failed":
+            write(f"[swarm] 团队协作失败：{_preview_text(event.get('message', ''), multiline=False)}")
+        elif event["type"] == "delegate_start":
+            write(f'[delegate] 启动子任务：{_preview_text(event["description"], multiline=False)}')
+        elif event["type"] == "delegate_complete":
+            write(f'[delegate] 子任务完成，返回结果：{_preview_text(event["description"], multiline=False)}')
+        elif event["type"] == "delegate_failed":
+            description = _preview_text(event["description"], multiline=False)
+            message = _preview_text(event["message"], multiline=False)
+            write(f"[delegate] 子任务失败：{description}；{message}")
+        elif event["type"] == "response_start":
             response_streamed = False
         elif event["type"] == "text":
             fragments = event["text"] if terminal else (event["text"],)
@@ -170,19 +277,26 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if terminal and character_delay > 0 and abort.wait(character_delay):
                     return
         elif event["type"] == "usage":
-            write(format_usage(event["record"]))
+            write(prefix + format_usage(event["record"]))
         elif event["type"] == "tool":
-            write(f'[工具] {event["name"]}：{event["result"]["message"]}')
+            result = event["result"]
+            message = result["message"]
+            if event["name"] == "read_file" and type(result.get("eof")) is bool:
+                if result["eof"]:
+                    message += " 本页已到文件末尾。"
+                else:
+                    message += f' 下一页：offset={result["next_offset"]}，column={result["next_column"]}。'
+            write(f'{prefix}[工具] {event["name"]}：{message}')
         elif event["type"] == "compact_start":
-            write(f'[压缩] 正在总结旧对话（第 {event["attempt"]} 次）。')
+            write(f'{prefix}[压缩] 正在总结旧对话（第 {event["attempt"]} 次）。')
         elif event["type"] == "compact_done":
-            write(f'[压缩] 已将上下文从 {event["before"]} 字符缩短至 {event["after"]} 字符。')
+            write(f'{prefix}[压缩] 已将上下文从 {event["before"]} 字符缩短至 {event["after"]} 字符。')
         elif event["type"] == "compact_skipped":
-            write("[压缩] 历史较短，无需压缩。")
+            write(prefix + "[压缩] 历史较短，无需压缩。")
         elif event["type"] == "retry":
             if event["partial"]:
-                write("[重试] 上次输出未完成，重新生成。")
-            write(f'[重试] {event["message"]}；{event["delay"]} 秒后进行第 {event["attempt"]} 次重试。')
+                write(prefix + "[重试] 上次输出未完成，重新生成。")
+            write(f'{prefix}[重试] {event["message"]}；{event["delay"]} 秒后进行第 {event["attempt"]} 次重试。')
 
     def run_query(state, *, compact=False):
         nonlocal messages
@@ -217,6 +331,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 # 输入结束仍等待已批准操作的结果；命令自身有有限超时。
                 if worker:
                     worker.join()
+                background_manager.shutdown()
                 return
             text = line.strip()
             if text == "/exit":
@@ -224,6 +339,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 cancel_confirmation()
                 if worker:
                     worker.join(timeout=1)
+                background_manager.shutdown()
                 with output_lock:
                     end_stream_line()
                 return
@@ -258,6 +374,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         cancel_confirmation()
         if worker:
             worker.join(timeout=1)
+        background_manager.shutdown()
         write("\n查询已停止。")
 
 

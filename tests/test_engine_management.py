@@ -92,17 +92,31 @@ class EngineManagementTests(unittest.TestCase):
         self.assertEqual(state.client.requests, [])
         self.assertEqual(events[-1]["type"], "compact_skipped")
 
-    def test_overlong_and_truncated_summaries_are_bounded_and_preserve_history(self):
-        state = self.state([reply("超" * 101), reply("不完整摘要", reason="length")],
+    def test_overlong_complete_summary_is_truncated_to_budget_and_committed(self):
+        state = self.state([reply("超" * 101)],
                            context_limit=1200, summary_limit=100, keep_recent_turns=1)
         state.messages = history()
         original = deepcopy(state.messages)
+        self.assertTrue(compact_history(state, force=True))
+        self.assertEqual(state.compaction_count, 1)
+        self.assertLess(context_size(state.messages, []), context_size(original, []))
+        summary = next(message for message in state.messages
+                       if message.get("role") == "assistant"
+                       and (message.get("content") or "").startswith("[历史对话摘要]"))
+        self.assertEqual(len(summary["content"].removeprefix("[历史对话摘要]\n")), 100)
+        self.assertEqual(len(state.client.requests), 1)
+
+    def test_unfinished_model_summary_preserves_history_and_consumes_compaction_limit(self):
+        state = self.state([reply("不完整摘要", reason="length")],
+                           context_limit=1200, summary_limit=100, keep_recent_turns=1,
+                           max_compactions=1)
+        state.messages = history()
+        original = deepcopy(state.messages)
         with self.assertRaisesRegex(ContextTooLong, "太长了，建议开个新会话"):
-            query_loop(state)
+            compact_history(state, force=True)
         self.assertEqual(state.messages, original)
-        self.assertEqual(state.compaction_count, 2)
-        self.assertEqual(len(state.client.requests), 2)
-        self.assertEqual(state.ledger.summary()["total_tokens"], 30)
+        self.assertEqual(state.compaction_count, 1)
+        self.assertEqual(len(state.client.requests), 1)
 
     def test_summary_network_failure_keeps_original_history(self):
         state = self.state([APIError("无法生成摘要")], keep_recent_turns=1)
@@ -124,7 +138,7 @@ class EngineManagementTests(unittest.TestCase):
         state = self.state([
             reply("摘" * 180), reply(None, [tool_call("first")]),
             reply("摘要"), reply(None, [tool_call("second")]),
-        ], context_limit=620, summary_limit=200, keep_recent_turns=0,
+        ], context_limit=620, summary_limit=200, keep_recent_turns=0, max_compactions=2,
             tool_executor=lambda *args: {"message": "结果" * 60})
         state.messages = history() + [{"role": "user", "content": "当前问题"}]
         with self.assertRaises(ContextTooLong):

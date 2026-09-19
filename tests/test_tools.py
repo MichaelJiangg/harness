@@ -33,19 +33,25 @@ class ToolTests(unittest.TestCase):
 
     def test_definitions_describe_registered_tools(self):
         definitions = get_tool_definitions()
-        self.assertEqual([tool["function"]["name"] for tool in definitions], ["bash", "grep", "read_file", "write_file"])
+        self.assertEqual([tool["function"]["name"] for tool in definitions],
+                         ["background_check", "background_submit", "bash", "delegate",
+                          "grep", "read_file", "run_verify", "swarm", "write_file"])
         definition = next(tool for tool in definitions if tool["function"]["name"] == "read_file")
         self.assertEqual(definition["type"], "function")
         self.assertTrue(definition["function"]["description"])
         schema = definition["function"]["parameters"]
         self.assertEqual(schema["type"], "object")
-        self.assertEqual(set(schema["properties"]), {"path", "offset", "limit"})
+        self.assertEqual(set(schema["properties"]), {"path", "offset", "column", "limit"})
         self.assertEqual(schema["properties"]["path"]["type"], "string")
         self.assertEqual(schema["properties"]["path"]["minLength"], 1)
         self.assertEqual(schema["properties"]["offset"]["type"], "integer")
         self.assertEqual(schema["properties"]["offset"]["minimum"], 0)
         self.assertEqual(schema["properties"]["limit"]["type"], "integer")
         self.assertEqual(schema["properties"]["limit"]["minimum"], 1)
+        self.assertEqual(schema["properties"]["limit"]["default"], 200)
+        self.assertEqual(schema["properties"]["column"]["type"], "integer")
+        self.assertEqual(schema["properties"]["column"]["minimum"], 0)
+        self.assertEqual(schema["properties"]["column"]["default"], 0)
         self.assertEqual(schema["required"], ["path"])
         self.assertIs(schema["additionalProperties"], False)
         json.dumps(definitions)
@@ -226,7 +232,11 @@ class ToolTests(unittest.TestCase):
         (self.workspace / "limit.txt").write_bytes(content.encode("utf-8"))
         result = self.read("limit.txt")
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["content"], content)
+        self.assertTrue(result["content"])
+        self.assertEqual(result["content"], content[:len(result["content"])])
+        self.assertFalse(result["eof"])
+        self.assertEqual(result["next_offset"], 0)
+        self.assertEqual(result["next_column"], len(result["content"]))
 
     def test_oversized_file_is_rejected_before_reading(self):
         (self.workspace / "large.txt").write_bytes(b"a" * (MAX_FILE_BYTES + 1))

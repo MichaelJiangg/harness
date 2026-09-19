@@ -17,14 +17,14 @@ from harness.audit import AuditError, PermissionAuditLog, sanitize
 class SanitizationTests(unittest.TestCase):
     def test_only_path_numbers_lengths_and_command_fingerprint_are_saved(self):
         params = {
-            "path": "src/config.py", "offset": 0, "limit": 20, "timeout": 3,
+            "path": "src/config.py", "offset": 0, "column": 12, "limit": 20, "timeout": 3,
             "max_results": 50, "content": "正文与秘密", "keyword": "私密关键词",
             "command": "printf 'sensitive-token'", "password": "password-value",
             "nested": {"content": "nested-secret"}, "glob": "secret-pattern",
         }
         clean = sanitize(params)
         self.assertEqual(clean, {
-            "path": "src/config.py", "offset": 0, "limit": 20, "timeout": 3,
+            "path": "src/config.py", "offset": 0, "column": 12, "limit": 20, "timeout": 3,
             "max_results": 50, "content_chars": 5, "keyword_chars": 5,
             "command_chars": len(params["command"]),
             "command_sha256": hashlib.sha256(params["command"].encode()).hexdigest(),
@@ -32,7 +32,7 @@ class SanitizationTests(unittest.TestCase):
         self.assertEqual(params["content"], "正文与秘密")
 
     def test_invalid_values_are_not_converted_to_strings(self):
-        clean = sanitize({"path": {"secret": "value"}, "offset": True,
+        clean = sanitize({"path": {"secret": "value"}, "offset": True, "column": "secret",
                           "limit": "secret", "timeout": float("inf"),
                           "max_results": float("nan"), "content": ["secret"],
                           "command": None, "keyword": 100})

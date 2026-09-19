@@ -21,7 +21,7 @@ def context_size(messages, tools):
     ))
 
 
-def split_for_summary(messages, keep_recent_turns=KEEP_RECENT_TURNS):
+def split_for_summary(messages, keep_recent_turns=KEEP_RECENT_TURNS, *, include_tool_history=False):
     """保留起始 system、最近完整用户轮次及当前未完成轮，不拆工具链。"""
     if type(keep_recent_turns) is not int or keep_recent_turns < 0:
         raise ValueError("保留轮数必须是非负整数。")
@@ -42,6 +42,54 @@ def split_for_summary(messages, keep_recent_turns=KEEP_RECENT_TURNS):
         recent_start = len(history)
     else:
         recent_start = user_starts[max(0, len(user_starts) - keep_count)]
+    if include_tool_history and incomplete:
+        # 保留最近完整用户轮次，只摘要当前任务内更早的完整工具批次。
+        current_start = user_starts[-1]
+        task, older_tools, recent_tools = split_tool_history(history[current_start:])
+        if older_tools:
+            return (deepcopy(prefix + history[recent_start:current_start] + task),
+                    deepcopy(history[:recent_start] + older_tools), recent_tools)
+    return deepcopy(prefix), deepcopy(history[:recent_start]), deepcopy(history[recent_start:])
+
+
+def split_tool_history(messages):
+    """为单任务子查询摘要旧工具批次，保留原任务及最后一组完整结果。"""
+    prefix_end = 0
+    while prefix_end < len(messages) and messages[prefix_end].get("role") == "system":
+        prefix_end += 1
+    if prefix_end == len(messages) or messages[prefix_end].get("role") != "user":
+        return deepcopy(messages[:prefix_end]), [], deepcopy(messages[prefix_end:])
+    prefix_end += 1
+    prefix, history = messages[:prefix_end], messages[prefix_end:]
+
+    # 子任务不会插入新用户轮次；异常或尚未回齐的工具链保持原样。
+    starts = []
+    index = 0
+    while index < len(history):
+        message = history[index]
+        if message.get("role") in {"user", "system", "tool"}:
+            return deepcopy(prefix), [], deepcopy(history)
+        calls = message.get("tool_calls")
+        if not calls:
+            index += 1
+            continue
+        if message.get("role") != "assistant" or not isinstance(calls, list):
+            return deepcopy(prefix), [], deepcopy(history)
+        ids = [call.get("id") if isinstance(call, dict) else None for call in calls]
+        results = history[index + 1:index + 1 + len(calls)]
+        result_ids = [result.get("tool_call_id") for result in results]
+        if (any(not isinstance(call_id, str) or not call_id for call_id in ids)
+                or len(set(ids)) != len(ids) or len(results) != len(ids)
+                or any(result.get("role") != "tool" for result in results)
+                or any(not isinstance(call_id, str) for call_id in result_ids)
+                or sorted(result_ids) != sorted(ids)):
+            return deepcopy(prefix), [], deepcopy(history)
+        starts.append(index)
+        index += 1 + len(calls)
+    if not starts or starts[-1] == 0:
+        return deepcopy(prefix), [], deepcopy(history)
+    # 第一次摘要仍超限时，旧摘要也是可再次压缩的资料。
+    recent_start = starts[-1]
     return deepcopy(prefix), deepcopy(history[:recent_start]), deepcopy(history[recent_start:])
 
 

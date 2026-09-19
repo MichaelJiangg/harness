@@ -31,7 +31,9 @@ class ReadFileIntegrationTests(unittest.TestCase):
                 self.assertEqual(query_loop(state), "文件包含两行。")
 
             definitions = client.requests[0]["tools"]
-            self.assertEqual([item["function"]["name"] for item in definitions], ["bash", "grep", "read_file", "write_file"])
+            self.assertEqual([item["function"]["name"] for item in definitions],
+                             ["background_check", "background_submit", "bash", "delegate",
+                              "grep", "read_file", "run_verify", "swarm", "write_file"])
             definition = next(item for item in definitions if item["function"]["name"] == "read_file")
             self.assertEqual(definition["type"], "function")
             function = definition["function"]
@@ -92,27 +94,35 @@ class ReadFileIntegrationTests(unittest.TestCase):
             self.assertEqual(json.loads(success["content"])["content"], "修正路径后读取成功。")
             self.assertEqual(state.ledger.summary()["requests"], 3)
 
-    def test_large_file_result_uses_existing_context_truncation(self):
+    def test_large_file_returns_a_bounded_page_with_a_usable_continuation_cursor(self):
         with TemporaryDirectory() as workspace:
             content = "头部标记" + "长" * 10000 + "尾部标记"
             Path(workspace, "long.txt").write_text(content, encoding="utf-8")
-            client = FakeClient([reply(None, [read_call("long", "long.txt")]), reply("结果已截断。")])
+            client = FakeClient([reply(None, [read_call("long", "long.txt")]), reply("已返回第一页。")])
             events = []
             state = QueryState(client, UsageLedger(), tool_executor=create_tool_executor(workspace),
-                               on_event=events.append)
+                               on_event=events.append, tool_result_limit=1500)
             state.messages.append({"role": "user", "content": "读取长文件"})
-            self.assertEqual(query_loop(state), "结果已截断。")
+            self.assertEqual(query_loop(state), "已返回第一页。")
             message = client.requests[1]["messages"][-1]
             self.assertEqual(message["tool_call_id"], "long")
-            self.assertLessEqual(len(message["content"]), 6000)
-            truncated = json.loads(message["content"])
-            self.assertTrue(truncated["truncated"])
-            self.assertGreater(truncated["original_chars"], 10000)
-            self.assertIn("头部标记", truncated["head"])
-            self.assertIn("尾部标记", truncated["tail"])
+            self.assertLessEqual(len(message["content"]), state.tool_result_limit)
+            page = json.loads(message["content"])
+            self.assertEqual(page["status"], "success")
+            self.assertTrue(page["executed"])
+            self.assertEqual(page["content"], content[:len(page["content"])])
+            self.assertTrue(page["content"].startswith("头部标记"))
+            self.assertNotIn("尾部标记", page["content"])
+            self.assertNotIn("head", page)
+            self.assertNotIn("tail", page)
+            self.assertFalse(page["eof"])
+            self.assertEqual((page["offset"], page["column"]), (0, 0))
+            self.assertEqual((page["next_offset"], page["next_column"]), (0, len(page["content"])))
+            self.assertGreater(page["next_column"], 0)
+            self.assertEqual(page["total_lines"], 1)
             result_event = next(event for event in events if event["type"] == "tool")
-            self.assertEqual(set(result_event["result"]), {"message"})
-            self.assertIn("已截断", result_event["result"]["message"])
+            self.assertEqual(result_event["result"]["content"], page["content"])
+            self.assertEqual(result_event["result"]["next_column"], page["next_column"])
 
     def test_streaming_tool_fragments_execute_real_read_and_preserve_usage(self):
         with TemporaryDirectory() as workspace:

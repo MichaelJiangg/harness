@@ -4,7 +4,7 @@ import unittest
 
 from harness.context import (
     DEFAULT_CONTEXT_LIMIT, DEFAULT_SUMMARY_LIMIT, KEEP_RECENT_TURNS, TOOL_RESULT_LIMIT,
-    context_size, split_for_summary, summarized_messages, summary_request, truncate_tool_result,
+    context_size, split_for_summary, split_tool_history, summarized_messages, summary_request, truncate_tool_result,
 )
 
 
@@ -27,7 +27,7 @@ def turn(number, *, tools=False, complete=True):
 class ContextTests(unittest.TestCase):
     def test_defaults_match_documented_budgets(self):
         self.assertEqual((DEFAULT_CONTEXT_LIMIT, DEFAULT_SUMMARY_LIMIT, KEEP_RECENT_TURNS, TOOL_RESULT_LIMIT),
-                         (24000, 2000, 4, 6000))
+                         (64000, 2000, 4, 12000))
 
     def test_context_budget_counts_messages_tools_unicode_and_structure(self):
         messages = [{"role": "user", "content": "中文 😀\n"}]
@@ -117,6 +117,125 @@ class ContextTests(unittest.TestCase):
         encoded = request[1]["content"].split("\n", 1)[1]
         self.assertEqual(json.loads(encoded), older)
         self.assertEqual(older, original)
+
+
+class ToolHistorySplitTests(unittest.TestCase):
+    def setUp(self):
+        self.prefix = [
+            {"role": "system", "content": "系统约束"},
+            {"role": "system", "content": "子任务约束"},
+            {"role": "user", "content": "检查项目，保留所有原始目标与限制。"},
+        ]
+
+    @staticmethod
+    def batch(number, count=1):
+        calls = [{"id": f"read-{number}-{index}", "type": "function", "function": {
+            "name": "read_file", "arguments": json.dumps({"path": f"file-{number}-{index}.py"}),
+        }} for index in range(count)]
+        return [{"role": "assistant", "content": f"读取第 {number} 批", "tool_calls": calls}] + [
+            {"role": "tool", "tool_call_id": call["id"], "content": f"文件内容 {call['id']}"}
+            for call in calls
+        ]
+
+    def assert_unsplittable(self, messages):
+        original = deepcopy(messages)
+        prefix, older, recent = split_tool_history(messages)
+        self.assertEqual(older, [])
+        self.assertEqual(prefix + recent, original)
+        self.assertEqual(messages, original)
+
+    def test_two_complete_batches_keep_task_and_latest_batch(self):
+        first, last = self.batch(0), self.batch(1)
+        messages = self.prefix + first + last
+        self.assertEqual(split_tool_history(messages), (self.prefix, first, last))
+
+    def test_multiple_calls_in_a_batch_are_kept_together_regardless_of_result_order(self):
+        first, middle, last = self.batch(0, 2), self.batch(1, 3), self.batch(2, 2)
+        last = last[:1] + last[:0:-1]
+        prefix, older, recent = split_tool_history(self.prefix + first + middle + last)
+        self.assertEqual(prefix, self.prefix)
+        self.assertEqual(older, first + middle)
+        self.assertEqual(recent, last)
+        self.assertEqual({call["id"] for call in recent[0]["tool_calls"]},
+                         {message["tool_call_id"] for message in recent[1:]})
+
+    def test_long_original_task_remains_exactly_in_prefix(self):
+        task = "目标和限制" * 6000
+        prefix = self.prefix[:-1] + [{"role": "user", "content": task}]
+        actual, older, recent = split_tool_history(prefix + self.batch(0) + self.batch(1))
+        self.assertEqual(actual, prefix)
+        self.assertEqual(actual[-1]["content"], task)
+        self.assertEqual(older, self.batch(0))
+        self.assertEqual(recent, self.batch(1))
+
+    def test_existing_summary_is_included_in_older_material(self):
+        summary = [{"role": "assistant", "content": "[历史对话摘要]\n已确认入口与权限边界。"}]
+        first, last = self.batch(0), self.batch(1)
+        for older_batches in (first, []):
+            with self.subTest(older_batches=older_batches):
+                self.assertEqual(split_tool_history(self.prefix + summary + older_batches + last),
+                                 (self.prefix, summary + older_batches, last))
+
+    def test_no_older_material_or_complete_batch_does_not_request_a_summary(self):
+        summary = [{"role": "assistant", "content": "[历史对话摘要]\n已有摘要。"}]
+        for tail in ([], self.batch(0, 3), summary):
+            with self.subTest(tail=tail):
+                self.assert_unsplittable(self.prefix + tail)
+
+    def test_unfinished_or_interrupted_batch_does_not_split(self):
+        first, second = self.batch(0), self.batch(1, 2)
+        variants = (
+            second[:1],
+            second[:-1],
+            second[:1] + [{"role": "assistant", "content": "插入回答"}] + second[1:],
+            second[:1] + [{"role": "user", "content": "中途插入问题"}] + second[1:],
+        )
+        for unfinished in variants:
+            with self.subTest(unfinished=unfinished):
+                self.assert_unsplittable(self.prefix + first + unfinished)
+
+    def test_duplicate_call_ids_duplicate_results_and_wrong_ids_do_not_split(self):
+        duplicate_calls = self.batch(1, 2)
+        duplicate_calls[0]["tool_calls"][1]["id"] = duplicate_calls[0]["tool_calls"][0]["id"]
+        duplicate_results = self.batch(1, 2)
+        duplicate_results[2]["tool_call_id"] = duplicate_results[1]["tool_call_id"]
+        wrong_result = self.batch(1)
+        wrong_result[1]["tool_call_id"] = "not-declared"
+        missing_id = self.batch(1)
+        del missing_id[1]["tool_call_id"]
+        empty_id = self.batch(1)
+        empty_id[0]["tool_calls"][0]["id"] = ""
+        empty_id[1]["tool_call_id"] = ""
+        for invalid in (duplicate_calls, duplicate_results, wrong_result, missing_id, empty_id):
+            with self.subTest(invalid=invalid):
+                self.assert_unsplittable(self.prefix + self.batch(0) + invalid)
+
+    def test_orphan_or_extra_tool_results_do_not_split(self):
+        orphan = {"role": "tool", "tool_call_id": "orphan", "content": "孤立结果"}
+        first, second = self.batch(0), self.batch(1)
+        for tail in ([orphan] + first + second, first + [orphan] + second, first + second + [orphan]):
+            with self.subTest(tail=tail):
+                self.assert_unsplittable(self.prefix + tail)
+
+    def test_extra_user_or_system_messages_reject_single_task_fallback(self):
+        first, second = self.batch(0), self.batch(1)
+        for role in ("user", "system"):
+            inserted = {"role": role, "content": "不可移动的额外消息"}
+            for tail in ([inserted] + first + second, first + [inserted] + second, first + second + [inserted]):
+                with self.subTest(role=role, tail=tail):
+                    self.assert_unsplittable(self.prefix + tail)
+        self.assert_unsplittable(self.prefix[:-1] + first + second)
+
+    def test_valid_split_returns_deep_copies_without_mutating_input(self):
+        messages = self.prefix + self.batch(0) + self.batch(1, 2)
+        original = deepcopy(messages)
+        prefix, older, recent = split_tool_history(messages)
+        prefix[0]["content"] = "changed system"
+        prefix[-1]["content"] = "changed task"
+        older[0]["tool_calls"][0]["function"]["arguments"] = "changed arguments"
+        recent[0]["tool_calls"][0]["id"] = "changed id"
+        recent[1]["content"] = "changed result"
+        self.assertEqual(messages, original)
 
 
 class ToolResultTruncationTests(unittest.TestCase):
@@ -237,7 +356,7 @@ class BashResultTruncationTests(unittest.TestCase):
                 self.assertTrue(parsed["stderr"].endswith("尾错误"))
 
     def test_capture_truncation_flags_and_unknown_exit_code_survive(self):
-        result = self.result("已截断的短输出", "e" * 10000,
+        result = self.result("已截断的短输出", "e" * (TOOL_RESULT_LIMIT * 2),
                              stdout_truncated=True, stdout_bytes=99999,
                              exit_code=None, cancelled=True)
         parsed = json.loads(truncate_tool_result(result))

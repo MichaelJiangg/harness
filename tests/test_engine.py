@@ -2,7 +2,7 @@ import copy
 import unittest
 
 from harness.client import APIError
-from harness.engine import QueryAborted, QueryState, query_loop
+from harness.engine import QueryAborted, QueryState, SYSTEM_PROMPT, query_loop
 from harness.usage import UsageLedger
 
 
@@ -50,6 +50,15 @@ class QueryLoopTests(unittest.TestCase):
         self.assertEqual(state.ledger.summary()["total_tokens"], 120)
         self.assertEqual(state.messages[-1]["content"], "最终回答")
         self.assertEqual([event["type"] for event in events], ["response_start", "usage"])
+
+    def test_system_prompt_requires_delegate_for_directory_analysis(self):
+        self.assertIn("目录级分析", SYSTEM_PROMPT)
+        self.assertIn("代码质量审查", SYSTEM_PROMPT)
+        self.assertIn("必须优先调用 delegate", SYSTEM_PROMPT)
+        self.assertIn("不直接在主会话逐文件读取", SYSTEM_PROMPT)
+        self.assertIn("background_submit", SYSTEM_PROMPT)
+        self.assertIn("background_check", SYSTEM_PROMPT)
+        self.assertIn("swarm", SYSTEM_PROMPT)
 
     def test_multiple_tools_and_rounds_preserve_assistant_and_results(self):
         import json

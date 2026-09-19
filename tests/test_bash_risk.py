@@ -20,13 +20,17 @@ class BashRiskTests(unittest.TestCase):
         self.check_commands("read_only", (
             "pwd", "pwd -P", "ls", "ls -la", "ls --all -- tests",
             "ls 'folder with spaces'", "/bin/ls -l tests", "/usr/bin/pwd",
-            "ls tests && pwd", "pwd || ls -1 tests",
+            "ls tests && pwd", "pwd || ls -1 tests", "cat README.md",
+            "ls; pwd", "node --version; python3 --version",
+            "sed -n '190,215p' index.html", "wc -l index.html README.md",
+            "ls *.py",
         ))
 
     def test_unknown_programs_and_options_need_confirmation(self):
         self.check_commands("write", (
-            "python -c 'print(1)'", "touch file", "cat README.md", "./ls",
+            "python -c 'print(1)'", "touch file", "./ls",
             "ls --unknown", "ls -Z", "pwd target", "", "ls &&", "&& pwd",
+            "node .verify/static.js", "ls; touch file",
         ))
 
     def test_destructive_keywords_and_option_variants(self):
@@ -54,11 +58,24 @@ class BashRiskTests(unittest.TestCase):
             "ls /tmp/../etc", "ls //etc/hosts", "ls /home/user/.ssh",
         ))
 
+    def test_extended_inspection_whitelist_still_blocks_writes(self):
+        self.check_commands("read_only", (
+            "cat README.md 2>/dev/null", "head -20 file.txt", "tail -n 30 file.txt",
+            "sed -n '20,40p' file.txt", "grep -n needle README.md",
+            "find . -maxdepth 2 -type f -name '*.py'", "wc -l *.py",
+            "node --version; python3 --version",
+        ))
+        self.check_commands("write", (
+            "sed -i 's/a/b/' file.txt", "sed -n '1w output.txt' file.txt",
+            "find . -delete", "find . -exec cat {} \\;", "tail -f log.txt",
+            "node check.js", "python3 script.py", "grep -R needle /etc",
+        ))
+
     def test_complex_syntax_and_environment_are_never_implicitly_read_only(self):
         self.check_commands("write", (
             "PATH=/tmp ls", "export PATH=/tmp", "LD_PRELOAD=evil.so ls",
             "ls $(touch file)", "ls `touch file`", "ls > output", "ls &",
-            "ls | cat", "ls; pwd", "ls\npwd", "ls *.py", "ls # comment",
+            "ls | cat", "ls\npwd", "ls # comment",
             "ls() { touch file; }; ls", "ls && touch file", "pwd || unknown",
             "ls 'unterminated", "ls <(pwd)", "ls\x00",
         ))

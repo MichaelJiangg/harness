@@ -23,7 +23,7 @@ def sanitize(params):
     result = {}
     if isinstance(params.get("path"), str):
         result["path"] = params["path"][:512]
-    for key in ("offset", "limit", "timeout", "max_results"):
+    for key in ("offset", "column", "limit", "timeout", "max_results"):
         value = params.get(key)
         if type(value) is int or type(value) is float and math.isfinite(value):
             result[key] = value

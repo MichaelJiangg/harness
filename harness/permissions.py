@@ -1,4 +1,8 @@
-"""权限规则按优先级匹配，第一条命中生效，未命中使用默认策略。"""
+"""权限引擎：加载时校验并排序规则，调用时匹配规则并返回决策。
+
+PermissionPolicy 处理工具级禁止和默认配置；check_permission 负责首条匹配。
+这里只回答「能否执行」，实际询问用户、记录审计和执行工具由 executor 负责。
+"""
 
 from dataclasses import dataclass, field, replace
 import os
@@ -9,12 +13,20 @@ import unicodedata
 from .bash_risk import classify_bash_risk
 
 
+# 风险等级与权限决策是两件事：高风险默认仍须确认，由 CLI 加醒目警告；
+# 永久禁止要靠 deny 配置。ask 对应示例骨架中的 CONFIRM。
 DEFAULT_POLICY = {"low": "allow", "medium": "ask", "high": "ask"}
 
 
 def get_risk_level(tool_name, params=None):
+    """评估操作本身的风险，不在这里判断规则或询问用户。"""
     if tool_name in {"read_file", "grep"}:
         return "low"
+    if tool_name == "background_check":
+        return "low"
+    if tool_name == "background_submit":
+        command = params.get("command") if isinstance(params, dict) else None
+        return get_risk_level("bash", {"command": command}) if isinstance(command, str) else "medium"
     if tool_name == "bash":
         command = params.get("command") if isinstance(params, dict) else None
         if not isinstance(command, str):
@@ -25,6 +37,8 @@ def get_risk_level(tool_name, params=None):
 
 @dataclass(frozen=True)
 class PermissionDecision:
+    """决策及其依据：既用于执行分支，也用于拒绝说明和审计定位。"""
+
     decision: str
     risk: str
     matched_rule: str
@@ -42,6 +56,8 @@ def build_denial_message(tool_name, params, reason):
 
 @dataclass(frozen=True)
 class PermissionRule:
+    """一条规则 = 目标工具 + 可选匹配条件 + 命中后的 action。"""
+
     tool: str
     action: str
     priority: int = 0
@@ -62,7 +78,7 @@ class PermissionRule:
                                      or len(self.name) > 128 or not self.name.isprintable()):
             raise ValueError("规则 name 必须是最多 128 字符的非空可显示名称。")
         if self.directory is not None:
-            if (self.tool not in {"read_file", "write_file"}
+            if (self.tool not in {"read_file", "write_file", "run_verify"}
                     or not isinstance(self.directory, str) or not self.directory.strip()
                     or "\x00" in self.directory or Path(self.directory).is_absolute()
                     or ".." in Path(self.directory).parts):
@@ -76,25 +92,31 @@ class PermissionRule:
             except (re.error, OverflowError, RecursionError):
                 raise ValueError("规则 command_pattern 不是有效的正则表达式。") from None
             object.__setattr__(self, "_pattern", pattern)
-        if self.action == "allow" and (self.tool == "bash"
-                                      or self.tool == "write_file" and self.directory is None):
-            raise ValueError("Bash 不支持强制 allow；写入 allow 规则必须限定 directory。")
+        if self.action == "allow" and (
+            self.tool == "bash"
+            or self.tool in {"write_file", "run_verify"} and self.directory is None
+        ):
+            raise ValueError("Bash 不支持强制 allow；写入和验证 allow 规则必须限定 directory。")
 
     def matches(self, tool_name, params, *, workspace=None):
+        """只判断本条规则是否适用；是否放行由调用方读取 action 决定。"""
         if self.tool != tool_name:
             return False
         if self._pattern is not None:
+            # Bash 条件搜索整条命令原文，不能当成完整的 Shell 行为分析。
             command = params.get("command")
             return isinstance(command, str) and self._pattern.search(command) is not None
         if self.directory is None:
+            # 工具名已经匹配，且没有目录或命令条件，规则即适用。
             return True
-        raw_path = params.get("path")
+        raw_path = params.get("path") if self.tool in {"read_file", "write_file"} else params.get("target")
         if not isinstance(raw_path, str) or not raw_path.strip() or "\x00" in raw_path:
             raise ValueError("无法检查目录规则，工具路径无效。")
         root = Path.cwd() if workspace is None else Path(workspace)
         root = root.resolve()
         boundary = root / self.directory
         candidate = root / raw_path
+        # lexical 消除 .. 等路径写法，resolved 进一步跟随软链接找到实际目标。
         lexical = Path(os.path.abspath(candidate))
         resolved = candidate.resolve()
         # 放行须同时满足两种路径；限制也覆盖指向受限目录的其他别名。
@@ -122,27 +144,42 @@ def parse_rules(values):
                 raise ValueError("权限规则缺少规定字段或包含未知字段。") from None
         if not isinstance(value, PermissionRule):
             raise ValueError("权限 rules 必须包含有效的规则对象。")
+        # 在排序前取声明位置，日志中的 rules[index] 才能对应原配置。
         rules.append(value if value.name is not None else replace(value, name=f"rules[{index}]"))
     if len({rule.name for rule in rules}) != len(rules):
         raise ValueError("权限规则名称不能重复。")
+    # 第一排序项：deny 为 False，排在其他规则的 True 前面。
+    # 第二排序项：取负数让更大的 priority 排在前面；同值保留原声明顺序。
+    # 因此 allow 的数字再大，也不能压过一条匹配的 deny。
     return tuple(sorted(rules, key=lambda rule: (rule.action != "deny", -rule.priority)))
 
 
 def check_permission(tool_name, params, rules, *, workspace=None, default=None, details=False):
-    """rules 由 parse_rules 按优先级排列；第一条匹配规则决定结果。"""
+    """按顺序匹配规则，首条命中决定结果；没有命中才使用默认策略。
+
+    调用方须传入 parse_rules 排好序的 rules，本函数不重新排序。
+    default 是工具级兜底决策；未提供时才按 DEFAULT_POLICY[risk] 兜底。
+    默认返回 allow／ask／deny；details=True 额外返回风险、规则及原因。
+    """
+    # 1. 先评估风险，供默认策略、界面提示和审计共同使用。
     risk = get_risk_level(tool_name, params)
+    # 2. 先准备「没有规则命中」的结果；后面的匹配规则可以覆盖它。
     result = PermissionDecision(default if default is not None else DEFAULT_POLICY[risk],
                                 risk, "default", "使用风险等级默认策略。")
+    # 3. 已按优先级排列，遇到第一条匹配就停止，不合并后续规则。
     for rule in rules:
         if rule.matches(tool_name, params, workspace=workspace):
             result = PermissionDecision(rule.action, risk, rule.name or "rule",
                                         f"命中权限规则「{rule.name or 'rule'}」，决策为 {rule.action}。")
             break
+    # 若循环没有命中，result 仍是上面准备的兜底结果。
     return result if details else result.decision
 
 
 @dataclass(frozen=True)
 class PermissionPolicy:
+    """完整策略入口：工具级禁止 → 有序规则 → 工具级或风险默认策略。"""
+
     allow: frozenset[str] = frozenset()
     ask: frozenset[str] = frozenset()
     deny: frozenset[str] = frozenset()
@@ -165,14 +202,18 @@ class PermissionPolicy:
     def evaluate(self, name, params=None, *, workspace=None):
         params = params if params is not None else {}
         risk = get_risk_level(name, params)
+        # 工具级 deny 直接返回，目录规则和会话授权都不能覆盖它。
         if name in self.deny:
             return PermissionDecision("deny", risk, "tools:deny", "当前工具位于配置的 deny 列表中。")
+        # 以下只是准备兜底，并不提前返回；细粒度规则仍有机会先决定结果。
+        # 写文件不能仅凭工具名 allow 放行，Bash 的 allow 也不能跳过风险判断。
         if name in self.ask or name == "write_file":
             default = "ask"
         elif name in self.allow and name != "bash":
             default = "allow"
         else:
             default = None
+        # 核心循环：首条规则匹配生效，否则采用刚才准备的兜底。
         result = check_permission(name, params, self.rules, workspace=workspace, default=default, details=True)
         if result.matched_rule == "default" and default is not None:
             result = replace(result, matched_rule=f"tools:{default}", reason="使用工具级默认权限配置。")
@@ -186,16 +227,17 @@ class SessionPermissionCache:
         self._approved_patterns = set()
 
     def remember(self, tool_name, directory, *, workspace):
-        if tool_name != "write_file":
+        # 执行器只在明确确认且成功执行后调用；Bash 不获得会话授权。
+        if tool_name not in {"write_file", "run_verify"}:
             return
         root = Path(workspace).resolve()
-        rule = PermissionRule("write_file", "allow", directory=directory)
+        rule = PermissionRule(tool_name, "allow", directory=directory)
         self._approved_patterns.add((str(root), rule.directory))
 
     def is_approved(self, tool_name, params, *, workspace):
-        if tool_name != "write_file":
+        if tool_name not in {"write_file", "run_verify"}:
             return False
         root = Path(workspace).resolve()
         return any(saved_root == str(root) and PermissionRule(
-            "write_file", "allow", directory=directory).matches(tool_name, params, workspace=root)
+            tool_name, "allow", directory=directory).matches(tool_name, params, workspace=root)
             for saved_root, directory in self._approved_patterns)
