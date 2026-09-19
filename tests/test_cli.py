@@ -11,7 +11,7 @@ from threading import Condition, Event, Thread
 import unittest
 from unittest.mock import Mock, patch
 
-from harness.cli import HELP, run_cli
+from harness.cli import BRIEF_HELP, HELP, PRODUCT_NAME, PRODUCT_SUBTITLE, run_cli
 from harness.client import DEFAULT_MODEL
 from harness.engine import query_loop
 from harness.tools import create_tool_executor
@@ -160,7 +160,13 @@ class CLITests(unittest.TestCase):
         )
         client.complete.assert_not_called()
         self.assertIn("模型请求：0 次。", output.getvalue())
-        self.assertEqual(output.getvalue().count(HELP), 2)
+        self.assertEqual(output.getvalue().count(HELP), 1)
+        self.assertEqual(output.getvalue().count(BRIEF_HELP), 1)
+        self.assertIn(PRODUCT_NAME, output.getvalue())
+        self.assertIn(PRODUCT_SUBTITLE, output.getvalue())
+        self.assertIn("MUSE、Today", output.getvalue())
+        self.assertIn("五看三定", output.getvalue())
+        self.assertIn("发布页产品设计", output.getvalue())
         self.assertIn("未知命令，输入 /help 查看帮助。", output.getvalue())
         self.assertEqual(errors.getvalue(), "")
 
@@ -287,7 +293,7 @@ class CLITests(unittest.TestCase):
             with patch("harness.tools.executor.Path.cwd", return_value=Path(initial)) as cwd:
                 session = CLISession(client)
                 try:
-                    self.assertTrue(session.output.wait_for(HELP))
+                    self.assertTrue(session.output.wait_for(BRIEF_HELP))
                     cwd.return_value = Path(later)
                     session.input.send("读取文件\n")
                     session.close()

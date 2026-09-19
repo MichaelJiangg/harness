@@ -45,6 +45,7 @@
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
 - CLI 交互终端输出统一由 `rich` 负责：AI 回答使用 Markdown 面板和代码语法高亮，工具调用展示参数与结构摘要，系统、错误、后台、委托和 Swarm 状态分层配色；管道输出保持无 ANSI 的纯文本。工具事件可携带脱敏参数供终端显示，但不能向模型或日志放宽权限。
+- 启动界面只显示产品名、模型和一行使用提示，详细权限、工具与命令说明由 `/help` 提供，避免每次启动重复输出长文档。
 - `tests/`：使用 `unittest` 验证行为，默认不访问真实 DeepSeek API。
 - `README.md`：启动方法、配置、行为和限制。
 - `ROADMAP.md`：当前阶段、完成项、待办、阻塞和最近验证。

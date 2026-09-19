@@ -201,7 +201,7 @@ class WriteConfirmationCLITests(unittest.TestCase):
         session.input.send("/help\n")
         session.input.send("/compact\n")
         self.assertTrue(session.output.wait_for("暂时无法压缩"))
-        self.assertEqual(session.output.getvalue().count("/help  查看帮助"), 2)
+        self.assertEqual(session.output.getvalue().count("/help  查看帮助"), 1)
         session.input.send("yes\n")
         self.assertTrue(session.output.wait_for("正在等待本次写入确认"))
         self.assertFalse((self.root / "result.txt").exists())

@@ -182,7 +182,7 @@ class MemoryCLITests(unittest.TestCase):
 
         client.complete.assert_not_called()
         self.assertIn("FastAPI 和 PostgreSQL", output.getvalue())
-        self.assertIn("/memory", output.getvalue())
+        self.assertIn("本地记忆", output.getvalue())
         self.assertEqual(errors.getvalue(), "")
 
     def test_delete_and_clear_require_explicit_confirmation(self):

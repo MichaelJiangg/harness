@@ -48,6 +48,27 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 /help  查看帮助
 /exit  退出并停止后续模型和工具调用"""
 
+PRODUCT_NAME = "Delin Harness"
+PRODUCT_SUBTITLE = "Powered by Deepseek"
+BRIEF_HELP = """直接输入任务开始：
+
+1. 帮我调研 Personal Agent 的国内外竞品，包括 MUSE、Today 等。
+2. 帮我按照五看三定，做一份产品规划。
+3. 帮我做 Agent 的发布页产品设计。
+
+核心能力
+文件读写 · 命令执行 · 子任务编排 · 长期记忆
+
+常用命令
+
+/mode auto [目录]   减少重复确认
+/memory             查看会话记忆
+/notes              查看项目笔记
+/cost               查看用量
+/help               完整帮助
+
+输入 /exit 退出"""
+
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
             character_delay=None, memory_enabled=False, memory_store=None,
@@ -679,13 +700,16 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     if terminal:
         with output_lock:
             console.print(Panel(
-                Text(f"Harness · {DEFAULT_MODEL}", style="bold cyan"),
+                Group(
+                    Text(PRODUCT_NAME, style="bold cyan", justify="center"),
+                    Text(PRODUCT_SUBTITLE, style="dim", justify="center"),
+                ),
                 border_style="cyan",
                 expand=False,
             ))
-            console.print(Text(HELP, style="dim"), soft_wrap=True)
+            console.print(Text(BRIEF_HELP, style="dim"), soft_wrap=True)
     else:
-        write(f"DeepSeek 查询引擎 · {DEFAULT_MODEL}\n{HELP}")
+        write(f"{PRODUCT_NAME} · {PRODUCT_SUBTITLE}\n{BRIEF_HELP}")
     if memory_load_error:
         write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
     if notes_load_error:
