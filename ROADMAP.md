@@ -150,6 +150,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.10.2 已发布。远端 `main` 提交为 `ec6166b197f964130c00652b951e4abe50a379ba`，注解标签对象为 `9707fb8c806a9d5ec31446c629a0667ff5ccd4a3`，标签 `v0.10.2` 指向该提交；Release「V0.10.2 - Add-统一配置管理」为正式版、非草稿并作为 Latest。
 - 2026-09-20：统一配置管理完成后全量 596 项离线测试通过，覆盖无配置默认启动、partial config.toml 合并、CLI/环境变量/文件优先级、MCP 列表覆盖、无效配置脱敏、CLI 参数解析、运行时集成和 `max_turns` 上限；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.10.1 已发布。远端 `main` 提交为 `be948846405566b41e913aa76008a7916f8e8e74`，注解标签对象为 `50b01daab0c922bb63d565cae5a1453bbd5ff616`，标签 `v0.10.1` 指向该提交；Release「V0.10.1 - Add-连接所有模块」为正式版、非草稿并作为 Latest。
 - 2026-09-20：组装入口完成后全量 620 项离线测试通过，覆盖 `create_app()` 返回唯一可调用入口、默认 provider 与客户端组装、注入客户端跳过密钥加载、`run_cli` 全部生命周期开关，以及 `python -m harness` 使用新入口；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
