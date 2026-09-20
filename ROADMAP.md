@@ -147,6 +147,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.9.3 已发布。远端 `main` 提交为 `06be8ef342d934d8a52bf87b759c69c1ad89ee27`，注解标签对象为 `54bc0045a361fe2d154c7127ef4f9432aa013afc`，标签 `v0.9.3` 指向该提交；Release「V0.9.3 - Add-多行输入fix」为正式版、非草稿并作为 Latest。
 - 2026-09-20：终端多行输入完成后全量 605 项离线测试通过，覆盖双空行发送、续行行号、粘贴内部空行、管道单行兼容，以及模型运行期间确认和本地命令仍即时响应；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：本地命令扩展完成后全量 601 项离线测试通过，覆盖命令自动发现、`/clear` 清空后下一轮上下文、`/history` 展示、`/model` 查看与切换、`/tools` 列表、混合 provider 币种分账，以及等待确认期间本地命令不误批准；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.2 已发布。远端 `main` 提交为 `460914283dc92b116470bb4ae1912c895df299c5`，注解标签对象为 `dde5ff7d936d8da42ff364287f955c33886ca0c4`，标签 `v0.9.2` 指向该提交；Release「V0.9.2 - Add-新增GLM模型支持」为正式版、非草稿并作为 Latest。
