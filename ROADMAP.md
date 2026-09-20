@@ -156,6 +156,7 @@
 
 ## 最近验证
 
+- 2026-09-21：V1.0.3 已发布。远端 `main` 提交为 `54bf9223936897e0e4cfec4f6b62a5bba4db931e`，注解标签对象为 `e31ac1c9a03d668212da9d963fb3aac1e5e76bd9`，标签 `v1.0.3` 指向该提交；Release「V1.0.3 - bugfix-乱码修复」为正式版、非草稿并作为 Latest。
 - 2026-09-21：修复交互终端 busy 输入乱码：`terminal_cbreak` 增加关闭 `ECHO`，`read_interruptible_line` 对可打印字符和回车手动回显，避免方向键等控制序列被终端直接输出；流式 Markdown 统一经过控制字符清洗。全量 609 项离线测试通过。
 - 2026-09-21：V1.0.2 已发布。远端 `main` 提交为 `699b85bb4a04f61f06a1cf929ffb2e1833a0f9b1`，注解标签对象为 `9d500d5da191f058f3a4dbd1d41c3b9257942a9e`，标签 `v1.0.2` 指向该提交；Release「V1.0.2 - bugfix-模型切换」为正式版、非草稿并作为 Latest。
 - 2026-09-20：V1.0.1 已发布。远端 `main` 提交为 `593eeeaf7f76a59e7510ceb07a4aa7d861b2e84f`，注解标签对象为 `8fcd90b252aba6add55cafb172a6cd5fface6893`，标签 `v1.0.1` 指向该提交；Release「V1.0.1 - bugfix」为正式版、非草稿并作为 Latest。
