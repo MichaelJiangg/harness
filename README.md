@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.6.2 — 优化启动页**（Git 标签 `v0.6.2`）。在 V0.6.1 Rich 终端渲染基础上，优化产品品牌、产品场景示例和常用命令入口。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.6.3.1 — Add-智能搜索、记忆注入**（Git 标签 `v0.6.3.1`）。在 V0.6.2 基础上增加可选语义记忆召回、`/recall` 和分层记忆注入。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -47,6 +47,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `/compact` | 空闲时让模型总结旧对话，保留最近几轮；摘要请求计入 `/cost` |
 | `/mode ask|auto [目录]` | 切换权限模式；auto 模式信任当前或指定工作目录 |
 | `/memory [list\|show <id>\|delete <id> --yes\|clear --yes]` | 查看和管理本地会话记忆 |
+| `/recall <query> [--limit N\|--threshold T]` | 搜索语义相关的历史会话记忆 |
 | `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
 | `/activity [latest\|all\|clear]` | 查看后台工具、请求、压缩和编排活动 |
 | `/help` | 查看帮助 |
@@ -59,6 +60,24 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 正常通过 `/exit` 或输入结束退出时，Harness 会调用 DeepSeek 把本次对话压缩成一条摘要，保存到当前工作区的 `.harness/memory.json`。下次启动时自动加载最近 5 条摘要，作为背景注入系统提示，模型据此回答“上次讨论了什么”之类的问题。
 
 每条记录包含数字编号、UTC 日期、摘要和话题标签。摘要最多 1000 字，文件最多保留 20 条记录；文件采用 JSON 格式，权限为 `0600`，通过同目录临时文件原子替换，损坏时不会阻止 CLI 启动。摘要请求只提交用户和助手文字以及工具名称，不提交工具结果正文，避免把文件或命令输出写入记忆。
+
+安装 ChromaDB 后，Harness 会把摘要写入本地向量索引，并在新问题时检索语义相关记忆：
+
+```bash
+python3 -m pip install chromadb
+```
+
+未安装 ChromaDB 时，记忆功能继续使用最近 N 条基础模式；`/recall <query>` 会退化为本地文本相关度搜索：
+
+```text
+你 > /recall 数据库性能
+[0.92] 2026-09-20 — 数据库连接池配置
+[0.85] 2026-09-19 — PostgreSQL 索引优化讨论
+```
+
+`/recall` 支持 `--limit N` 和 `--threshold T`。
+
+系统提示按“项目笔记 → 最近会话 → 冷记忆”的顺序注入。冷记忆优先级最低；记忆总量超过预算时先裁剪冷记忆，再裁剪较旧的会话摘要，项目笔记始终保留。
 
 ```text
 你 > /memory
@@ -497,6 +516,7 @@ V0.5 提供三种编排方式：
 | `harness/orchestration.py` | 独立委托、后台分析和 Swarm 角色编排 |
 | `harness/background.py` | 后台任务状态、排队、并发限制与超时 |
 | `harness/memory/` | 本地 JSON 记忆、启动注入、退出摘要和记忆命令；`session.py` 保存核心，`injection.py` 负责上下文注入 |
+| `harness/memory/search.py` | 可选 ChromaDB 向量召回、文本降级和 `/recall` 相关度计算 |
 | `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
 | `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |

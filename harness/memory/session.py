@@ -70,6 +70,11 @@ def _validate_document(document):
             isinstance(topic, str) and topic.strip() for topic in topics
         ):
             raise ValueError
+        key_points = record.get("key_points", [])
+        if not isinstance(key_points, list) or not all(
+            isinstance(point, str) and point.strip() for point in key_points
+        ):
+            raise ValueError
         if "message_count" in record and (
             type(record["message_count"]) is not int or record["message_count"] < 0
         ):
@@ -131,7 +136,7 @@ class MemoryStore:
             raise ValueError("最近记忆条数必须是非负整数。")
         return self.records()[-count:]
 
-    def add(self, summary, *, topics=None, date=None, message_count=None):
+    def add(self, summary, *, topics=None, key_points=None, date=None, message_count=None):
         summary = _truncate(_clean_text(summary), MAX_SUMMARY_CHARS)
         if not summary:
             raise ValueError("会话摘要不能为空。")
@@ -143,6 +148,14 @@ class MemoryStore:
             for topic in topics
             if isinstance(topic, str) and _clean_text(topic).strip()
         ))[:MAX_TOPICS]
+        key_points = key_points if key_points is not None else []
+        if not isinstance(key_points, list):
+            raise ValueError("key_points 必须是列表。")
+        key_points = list(dict.fromkeys(
+            _clean_text(point).strip()[:400]
+            for point in key_points
+            if isinstance(point, str) and _clean_text(point).strip()
+        ))[:12]
         if date is None:
             date = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not isinstance(date, str) or not date.strip():
@@ -166,6 +179,7 @@ class MemoryStore:
                 "date": date,
                 "summary": summary,
                 "topics": topics,
+                "key_points": key_points,
                 **({"message_count": message_count} if message_count is not None else {}),
             }
             sessions.append(record)
@@ -214,6 +228,12 @@ def format_record(record):
     result = f"[{record_id}] {date} — {summary}"
     if topics:
         result += f"\n    话题：{'、'.join(topics)}"
+    key_points = [
+        _clean_text(point) for point in record.get("key_points", [])
+        if isinstance(point, str) and _clean_text(point)
+    ]
+    if key_points:
+        result += "\n    要点：" + "；".join(key_points)
     return result
 
 
@@ -280,7 +300,7 @@ def _parse_summary(content, fallback):
     summary = _truncate(_clean_text(fallback), MAX_SUMMARY_CHARS)
     topics = _infer_topics(summary)
     if not content:
-        return summary, topics
+        return summary, topics, []
     try:
         start = content.find("{")
         end = content.rfind("}")
@@ -289,10 +309,13 @@ def _parse_summary(content, fallback):
         payload = json.loads(content[start:end + 1])
         candidate = payload.get("summary") if isinstance(payload, dict) else None
         candidate_topics = payload.get("topics") if isinstance(payload, dict) else None
+        candidate_points = payload.get("key_points") if isinstance(payload, dict) else None
         if not isinstance(candidate, str) or not candidate.strip():
             raise ValueError
         if not isinstance(candidate_topics, list):
             candidate_topics = []
+        if not isinstance(candidate_points, list):
+            candidate_points = []
         summary = _truncate(_clean_text(candidate), MAX_SUMMARY_CHARS)
         topics = list(dict.fromkeys(
             _truncate(_clean_text(topic), MAX_TOPIC_CHARS)
@@ -301,9 +324,14 @@ def _parse_summary(content, fallback):
         ))[:MAX_TOPICS]
         if not topics:
             topics = _infer_topics(summary)
+        key_points = list(dict.fromkeys(
+            _clean_text(point).strip()[:400]
+            for point in candidate_points
+            if isinstance(point, str) and _clean_text(point).strip()
+        ))[:12]
     except (json.JSONDecodeError, ValueError, TypeError):
-        pass
-    return summary, topics
+        key_points = []
+    return summary, topics, key_points
 
 
 def summarize_session(client, messages, *, model=DEFAULT_MODEL):
@@ -318,7 +346,8 @@ def summarize_session(client, messages, *, model=DEFAULT_MODEL):
                 "你是会话记忆提取助手。阅读对话后只提取会影响后续工作的决定、约束、"
                 "关键事实、产出和待办；不要复述寒暄、工具调用过程或工具输出。"
                 "只返回一个 JSON 对象，不要 Markdown，格式为 "
-                '{"summary":"不超过 1000 字的中文摘要","topics":["话题1","话题2"]}。'
+                '{"summary":"不超过 1000 字的中文摘要",'
+                '"key_points":["要点1","要点2"],"topics":["话题1","话题2"]}。'
             ),
         },
         {"role": "user", "content": f"对话内容：\n{transcript}"},
@@ -331,5 +360,8 @@ def summarize_session(client, messages, *, model=DEFAULT_MODEL):
         )
     except Exception as error:
         response = getattr(error, "response", None)
-    summary, topics = _parse_summary(_response_content(response), transcript)
-    return {"summary": summary, "topics": topics, "response": response}
+    summary, topics, key_points = _parse_summary(_response_content(response), transcript)
+    return {
+        "summary": summary, "topics": topics, "key_points": key_points,
+        "response": response,
+    }

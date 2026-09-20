@@ -121,6 +121,36 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertNotIn("\x1b", memory_system_prompt(SYSTEM_PROMPT, records))
         self.assertNotIn("<instruction>", memory_system_prompt(SYSTEM_PROMPT, records))
 
+    def test_layered_injection_orders_recent_before_cold_and_keeps_notes(self):
+        recent = {"id": "1", "date": "2026-09-20", "summary": "项目约定使用 Python。",
+                  "topics": ["Python"], "key_points": []}
+        cold = {"id": "2", "date": "2026-09-10", "summary": "数据库连接池配置。",
+                "topics": ["数据库"], "key_points": []}
+        prompt = memory_system_prompt(
+            SYSTEM_PROMPT + "\n\n## 项目长期笔记\n必须保留的项目笔记。",
+            [recent], cold_records=[(cold, 0.92)],
+        )
+        self.assertIn("项目长期笔记", prompt)
+        self.assertIn("最近对话记忆", prompt)
+        self.assertIn("相关历史记忆", prompt)
+        self.assertIn("[0.92]", prompt)
+        self.assertLess(prompt.index("最近对话记忆"), prompt.index("相关历史记忆"))
+
+    def test_memory_capacity_trims_cold_before_recent_and_never_notes(self):
+        recent = {"id": "1", "date": "2026-09-20", "summary": "最近的会话摘要。",
+                  "topics": ["最近"], "key_points": []}
+        cold = [{"id": str(index), "date": "2026-09-01",
+                 "summary": "冷记忆" + "很长" * 80, "topics": ["冷"], "key_points": []}
+                for index in range(5)]
+        prompt = memory_system_prompt(
+            SYSTEM_PROMPT + "\n项目笔记必须保留。",
+            [recent], cold_records=[(record, 0.9) for record in cold],
+            max_chars=600,
+        )
+        self.assertIn("项目笔记必须保留", prompt)
+        self.assertIn("最近的会话摘要", prompt)
+        self.assertLess(len(prompt) - len(SYSTEM_PROMPT), 700)
+
 
 class MemorySummaryTests(unittest.TestCase):
     def test_summary_uses_user_and_assistant_text_without_tool_results(self):

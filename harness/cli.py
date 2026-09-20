@@ -18,7 +18,8 @@ from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .memory import (
-    MemoryStore, format_record, has_memory_candidates, memory_system_prompt, summarize_session,
+    MemoryStore, VectorMemoryStore, format_record, format_recall_result,
+    has_memory_candidates, memory_system_prompt, recall_memories, summarize_session,
 )
 from .notes import NotesStore, notes_system_prompt
 from .permissions import PermissionPolicy, SessionPermissionCache, get_risk_level
@@ -41,6 +42,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
 /mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
 /memory [list|show <id>|delete <id> --yes|clear --yes]  查看和管理本地会话记忆
+/recall <query> [--limit N] [--threshold T]  按语义搜索历史会话记忆
 /notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
 /activity [latest|all|clear]  查看后台工具、请求和编排活动
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
@@ -76,7 +78,7 @@ ACTIVITY_MAX_EVENTS = 500
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
             character_delay=None, memory_enabled=False, memory_store=None,
-            notes_enabled=False, notes_store=None):
+            notes_enabled=False, notes_store=None, vector_store=None):
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
     ledger = ledger if ledger is not None else UsageLedger()
@@ -100,9 +102,18 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         raise ValueError("notes_store 必须是 NotesStore。")
     memory_load_error = None
     memory_records = []
+    if vector_store is not None and not (
+        hasattr(vector_store, "available")
+        and callable(getattr(vector_store, "sync", None))
+        and callable(getattr(vector_store, "query", None))
+    ):
+        raise ValueError("vector_store 必须提供 available、sync 和 query 接口。")
     if memory_enabled:
         try:
             memory_records = memory_store.records()
+            if vector_store is None:
+                vector_store = VectorMemoryStore(Path.cwd())
+            vector_store.sync(memory_records)
         except Exception as error:
             memory_load_error = str(error)
     notes_load_error = None
@@ -112,11 +123,14 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             notes_content = notes_store.read()
         except Exception as error:
             notes_load_error = str(error)
+    base_system_content = notes_system_prompt(SYSTEM_PROMPT, notes_content)
+    semantic_memory = memory_enabled and vector_store.available
     messages = [{
         "role": "system",
-        "content": memory_system_prompt(
-            notes_system_prompt(SYSTEM_PROMPT, notes_content),
-            memory_records,
+        "content": (
+            base_system_content
+            if semantic_memory
+            else memory_system_prompt(base_system_content, memory_records)
         ),
     }]
     abort = Event()
@@ -309,10 +323,13 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 )
             record = memory_store.add(
                 result["summary"], topics=result["topics"],
+                key_points=result.get("key_points", []),
                 message_count=sum(
                     1 for message in messages if message.get("role") in {"user", "assistant"}
                 ),
             )
+            if vector_store is not None:
+                vector_store.sync([record])
             write(f"[memory] 已保存本次会话摘要 #{record['id']}。")
         except Exception as error:
             write(f"[memory] 保存会话摘要失败：{error}", error=True)
@@ -422,6 +439,84 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             write("清空项目笔记需要显式确认：/notes clear --yes")
             return
         write("用法：/notes [append <text>|replace --yes <text>|clear --yes]")
+
+    def handle_recall_command(text):
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            write("用法：/recall <query> [--limit N] [--threshold T]")
+            return
+        if len(parts) < 2:
+            write("用法：/recall <query> [--limit N] [--threshold T]")
+            return
+        query_parts = []
+        limit = 5
+        threshold = 0.45
+        index = 1
+        while index < len(parts):
+            token = parts[index]
+            if token == "--limit" and index + 1 < len(parts):
+                try:
+                    limit = int(parts[index + 1])
+                except ValueError:
+                    write("用法：/recall <query> [--limit N] [--threshold T]")
+                    return
+                if not 1 <= limit <= 20:
+                    write("limit 必须是 1～20 之间的整数。")
+                    return
+                index += 2
+                continue
+            if token == "--threshold" and index + 1 < len(parts):
+                try:
+                    threshold = float(parts[index + 1])
+                except ValueError:
+                    write("用法：/recall <query> [--limit N] [--threshold T]")
+                    return
+                if not 0 <= threshold <= 1:
+                    write("threshold 必须是 0～1 之间的小数。")
+                    return
+                index += 2
+                continue
+            query_parts.append(token)
+            index += 1
+        query = shlex.join(query_parts)
+        if not query:
+            write("用法：/recall <query> [--limit N] [--threshold T]")
+            return
+        try:
+            records = memory_store.records()
+            matched = recall_memories(
+                query, records, vector_store=vector_store,
+                limit=limit, threshold=threshold,
+            )
+        except Exception as error:
+            write(f"[memory] 搜索历史记忆失败：{error}", error=True)
+            return
+        if not matched:
+            write("没有找到相关历史记忆。")
+            return
+        if vector_store is None or not vector_store.available:
+            write("[memory] 向量搜索不可用，使用本地文本召回。", style="dim")
+        write("\n".join(
+            format_recall_result(record, score) for record, score in matched
+        ))
+
+    def inject_memory_for_query(query):
+        nonlocal messages
+        if not semantic_memory or vector_store is None:
+            return
+        try:
+            records = memory_store.records()
+            matched = recall_memories(
+                query, records, vector_store=vector_store,
+                limit=5, threshold=0.45,
+            )
+        except Exception:
+            matched = []
+        recent = memory_records[-5:]
+        messages[0]["content"] = memory_system_prompt(
+            base_system_content, recent, cold_records=matched,
+        )
 
     def confirm_tool(name, arguments, workspace):
         nonlocal pending_confirmation
@@ -748,6 +843,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             console.print(Text(BRIEF_HELP, style="dim"), soft_wrap=True)
     else:
         write(f"{PRODUCT_NAME} · {PRODUCT_SUBTITLE}\n{BRIEF_HELP}")
+    if memory_enabled:
+        if semantic_memory:
+            write("[memory] 向量记忆已启用。", style="dim")
+        else:
+            write("[memory] 向量搜索不可用，退回到最近记忆模式。", style="dim")
     if memory_load_error:
         write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
     if notes_load_error:
@@ -803,6 +903,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 write("上一轮查询进行中，暂时无法管理项目笔记；期间可以输入 /cost。")
             elif text.startswith("/notes"):
                 handle_notes_command(text)
+            elif text.startswith("/recall"):
+                handle_recall_command(text)
             elif text.startswith("/activity"):
                 handle_activity_command(text)
             elif text == "/cost":
@@ -820,6 +922,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             elif worker and worker.is_alive():
                 write("上一轮查询进行中，请等待回答；期间可以输入 /cost。")
             else:
+                inject_memory_for_query(text)
                 turn += 1
                 compact = text == "/compact"
                 state = QueryState(
