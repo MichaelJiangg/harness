@@ -1,5 +1,7 @@
+from io import StringIO
 import os
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -125,7 +127,7 @@ class ConfigTests(unittest.TestCase):
         read_text.assert_called_once_with(expected_path, encoding="utf-8-sig")
 
     def test_main_passes_loaded_key_to_client(self):
-        with patch("sys.argv", ["harness"]):
+        with patch("sys.argv", ["harness"]), patch("sys.stdout", StringIO()):
             with patch("harness.app.select_model_provider",
                        return_value=("deepseek", "test-value")) as select:
                 with patch("harness.app.ChatCompletionClient") as client:

@@ -84,7 +84,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
 交互终端输入：单行直接回车发送；行尾 \\ 续行或粘贴多行时回车换行、连续两个空行发送。模型执行期间的确认与本地命令仍为单行即时响应。
 模型回答或工具执行期间按 Esc 中断。
-启动参数：--config PATH --provider auto|deepseek|glm --model NAME --max-turns N --context-window N --tool-timeout N --mcp-server NAME=COMMAND --show-config
+启动参数：--config PATH --provider auto|deepseek|glm --model NAME --max-turns N --context-window N --tool-timeout N --mcp-server NAME=COMMAND --show-config --check
 
 {_format_command_help()}"""
 
@@ -1246,16 +1246,53 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     def format_tools():
         if not available_tool_definitions:
             return "当前没有可用工具。"
-        lines = [f"Available tools ({len(available_tool_definitions)}):"]
+        categories = [
+            ("文件与搜索", {
+                "read_file", "write_file", "grep",
+            }),
+            ("命令与验证", {
+                "bash", "run_verify",
+            }),
+            ("网页", {
+                "web_fetch", "web_search",
+            }),
+            ("项目笔记", {
+                "notes_read", "notes_append", "notes_replace",
+            }),
+            ("编排", {
+                "delegate", "background_submit", "background_check", "swarm",
+            }),
+            ("外部 MCP", set()),
+            ("其他", set()),
+        ]
+        groups = {name: [] for name, _ in categories}
         for definition in available_tool_definitions:
             function = definition.get("function", {}) if isinstance(definition, dict) else {}
             name = _preview_text(str(function.get("name", "unknown")), multiline=False)
             description = str(function.get("description", "")).strip()
             summary = description.splitlines()[0] if description else "无说明"
+            for delimiter in ("。", ". ", "；"):
+                if delimiter in summary:
+                    summary = summary.split(delimiter, 1)[0]
+                    break
             summary = _preview_text(summary, multiline=False)
-            if len(summary) > 180:
-                summary = summary[:177] + "..."
-            lines.append(f"  {name} — {summary}")
+            if len(summary) > 120:
+                summary = summary[:117] + "..."
+            category = next(
+                (label for label, names in categories if name in names),
+                "其他",
+            )
+            if name.startswith("mcp_"):
+                category = "外部 MCP"
+            groups[category].append((name, summary))
+        lines = [f"Available tools ({len(available_tool_definitions)}):", ""]
+        for label, _ in categories:
+            tools = sorted(groups.get(label, []))
+            if not tools:
+                continue
+            lines.append(label)
+            for name, summary in tools:
+                lines.append(f"  {name} — {summary}")
         return "\n".join(lines)
 
     def start_manual_compaction():

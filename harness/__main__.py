@@ -27,9 +27,22 @@ def main():
             for key, value in get_settings().items():
                 print(f"  {key}={value}")
             return 0
-        create_app(provider=args.provider, model=args.model)()
+        app = create_app(provider=args.provider, model=args.model)
+        from .startup import check_startup, format_startup_report
+
+        report_items, warnings = check_startup(
+            client=app.client,
+            check_mcp=args.check,
+        )
+        print(format_startup_report(report_items, warnings, check_mode=args.check))
+        if args.check:
+            return 0
+        app()
     except ValueError as error:
-        print(f"错误：{error}", file=sys.stderr)
+        message = str(error)
+        print(f"错误：{message}", file=sys.stderr)
+        if "API_KEY" in message:
+            print("提示：请在项目 .env 中设置 DEEPSEEK_API_KEY 或 GLM_API_KEY。", file=sys.stderr)
         return 1
     return 0
 

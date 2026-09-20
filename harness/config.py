@@ -438,6 +438,7 @@ def parse_cli_args(argv=None):
     parser.add_argument("--tool-timeout", type=int)
     parser.add_argument("--mcp-server", action="append", default=[])
     parser.add_argument("--show-config", action="store_true")
+    parser.add_argument("--check", action="store_true")
     return parser.parse_args(argv)
 
 

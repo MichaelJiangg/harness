@@ -281,6 +281,9 @@ class CLITests(unittest.TestCase):
         self.assertIn("Available tools (", text)
         self.assertIn("read_file", text)
         self.assertIn("bash", text)
+        self.assertIn("文件与搜索", text)
+        self.assertIn("命令与验证", text)
+        self.assertIn("编排", text)
         client.complete.assert_not_called()
         self.assertEqual(errors.getvalue(), "")
 

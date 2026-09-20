@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.10.2 — Add-统一配置管理**（Git 标签 `v0.10.2`）。支持 `.harness/config.toml`、环境变量和 CLI 分层覆盖。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.10.3 — Add-启动流程**（Git 标签 `v0.10.3`）。新增健壮启动检查、`--check` 状态报告和分组工具列表。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -71,6 +71,12 @@ python3 -m harness
 | `/exit` | 退出，停止后续模型和工具调用 |
 
 `python3 -m harness --help` 无需密钥即可查看帮助。支持单条管道输入，输入流结束后会等待回答；交互中一次处理一个问题，繁忙时的新问题会被提示稍后重发。
+
+启动时按顺序检查配置、查询引擎、内置工具、MCP、权限、Hooks、记忆和终端。可选模块失败会记录警告并继续启动；配置、查询引擎和内置工具等必需模块失败才会退出。使用 `--check` 只运行启动检查并连接 MCP，不进入对话模式：
+
+```bash
+python3 -m harness --check
+```
 
 完整生命周期通过 `harness.app.create_app()` 组装。`create_app()` 加载配置并创建当前 provider 客户端，返回唯一启动函数；启动函数再打开权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染：
 

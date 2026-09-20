@@ -110,7 +110,7 @@ timeout = 20
     def test_pyproject_keeps_only_package_metadata(self):
         path = Path(config.__file__).resolve().parent.parent / "pyproject.toml"
         document = config.tomllib.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(document["project"]["version"], "0.10.2")
+        self.assertEqual(document["project"]["version"], "0.10.3")
         self.assertNotIn("harness", document.get("tool", {}))
 
 

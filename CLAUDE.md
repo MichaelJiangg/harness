@@ -12,6 +12,7 @@
 - `pyproject.toml` 只保存项目元信息、依赖和仓库地址。Harness 运行配置来自内置默认值、`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，最终按 `CLI > 环境变量 > 配置文件 > 默认值` 解析；`harness/config.py` 严格校验并缓存启动快照，配置缺失时使用默认值，配置错误时停止启动。
 - `config.toml` 的 `[model]` 定义 DeepSeek 默认配置，`[glm]` 定义 GLM 配置。`HARNESS_PROVIDER`／`--provider` 支持 `auto`／`deepseek`／`glm`；默认 `auto` 在 `GLM_API_KEY` 非空时优先 GLM，否则回退 DeepSeek，两个密钥都没有时启动报错。
 - `harness/app.py` 是唯一组装入口，只负责 `get_settings()`、provider 选择和 `ChatCompletionClient` 创建，并返回 `start()`。工具权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染继续由 `run_cli` 在既有生命周期中连接；组装层不得复制这些初始化逻辑。
+- `harness/startup.py` 按配置、查询引擎、内置工具、MCP、权限、Hooks、记忆、终端的顺序生成启动报告。配置、客户端和内置工具为必需模块，失败时抛 `StartupFailure`；Hooks、记忆和非关键 MCP 失败降级为警告。`--check` 只运行报告并执行有界 MCP 连接检查，不进入对话模式。
 - `harness/permissions.py` 统一执行 `allow`、`ask`、`deny` 决策。`PermissionRule` 提供精确工具名、`action`、整数 `priority`（默认 0），以及可选 `directory` 或 `command_pattern`；配置放在 `[permissions.rules]`。工具级 `deny` 先拒绝，规则列表按禁止规则优先、数值优先级降序、同级声明顺序排列；`check_permission` 逐条匹配，第一条命中即返回，没有命中则沿用工具级配置及风险等级默认策略。未配置的新工具默认询问。
 - `PermissionPolicy` 增加会话模式 `ask`／`auto` 和 `auto_directories`。`auto` 模式信任当前工作目录或指定相对目录，自动放行读取、写入、验证、常见 Node/Python/Perl 脚本，以及安全的管道、`2>&1`、`2>/dev/null`、`$(pwd)` 和 heredoc 脚本；`deny` 始终优先，网络、破坏性命令、进程管理、敏感路径、越界和任意重定向仍须确认。
 - 目录规则仅用于单文件操作 `read_file`、`write_file`，以启动工作目录为根，支持目录及全部子目录；配置目录必须是无 `..` 的相对路径。放行要求标准化路径与解析软链接后的实际路径都在指定目录内，询问／禁止同时比较候选路径及配置目录各自的词法和实际路径，任一组合命中即生效，避免别名绕过限制；按路径组件判断，匹配异常不得放行。`grep` 仅支持工具级规则，不将搜索起点检查冒充搜索结果目录隔离。命令规则仅用于 `bash`，用正则搜索完整命令原文，启动时验证正则，不宣称能够识别任意 Shell 等价写法或替代沙箱。
