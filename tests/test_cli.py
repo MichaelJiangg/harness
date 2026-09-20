@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 from harness.cli import BRIEF_HELP, HELP, PRODUCT_NAME, PRODUCT_SUBTITLE, run_cli
 from harness.client import DEFAULT_MODEL
+from harness.commands import command_entries
 from harness.engine import query_loop
 from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
@@ -53,14 +54,27 @@ TOOL_CALL = {
 
 
 class QueuedInput:
-    def __init__(self, *lines):
+    def __init__(self, *lines, auto_blank=False):
         self.lines = Queue()
         self.eof_read = Event()
+        self.auto_blank = auto_blank
         for line in lines:
             self.send(line)
 
     def send(self, line):
+        if not line:
+            self.send_eof()
+            return
         self.lines.put(line)
+        normalized = line.rstrip("\r\n")
+        if (self.auto_blank
+                and normalized not in {"", "y", "n", "yes"}
+                and not normalized.startswith("/")):
+            self.lines.put("\n")
+            self.lines.put("\n")
+
+    def send_eof(self):
+        self.lines.put("")
 
     def readline(self):
         line = self.lines.get(timeout=3)
@@ -96,7 +110,7 @@ class ObservableOutput(StringIO):
 class CLISession:
     def __init__(self, client, *, ledger=None, lines=(), terminal=False,
                  character_delay=0.02, run_cli_kwargs=None):
-        self.input = QueuedInput(*lines)
+        self.input = QueuedInput(*lines, auto_blank=terminal)
         self.output = ObservableOutput(strip_ansi=terminal)
         self.input.isatty = lambda: terminal
         self.output.isatty = lambda: terminal
@@ -171,6 +185,102 @@ class CLITests(unittest.TestCase):
         self.assertIn("五看三定", output.getvalue())
         self.assertIn("发布页产品设计", output.getvalue())
         self.assertIn("未知命令，输入 /help 查看帮助。", output.getvalue())
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_new_commands_are_auto_discovered_and_listed_in_help(self):
+        names = {entry.name for entry in command_entries()}
+        self.assertTrue({
+            "/clear", "/history", "/model", "/cost", "/compact", "/tools", "/help",
+        }.issubset(names))
+        for name in ("/clear", "/history", "/model", "/tools"):
+            self.assertIn(name, HELP)
+
+    def test_clear_resets_conversation_before_the_next_question(self):
+        requests = []
+
+        def complete(**request):
+            requests.append(deepcopy(request["messages"]))
+            return reply(f"第 {len(requests)} 次回答")
+
+        session = CLISession(Mock(complete=Mock(side_effect=complete)), lines=("旧问题\n",))
+        try:
+            self.assertTrue(session.output.wait_for("DeepSeek > 第 1 次回答"))
+            session.input.send("/clear\n")
+            self.assertTrue(session.output.wait_for("对话已清空，重新开始。"))
+            session.input.send("新问题\n")
+            self.assertTrue(session.output.wait_for("DeepSeek > 第 2 次回答"))
+            session.close()
+            self.assertEqual(
+                [message for message in requests[1] if message["role"] != "system"],
+                [{"role": "user", "content": "新问题"}],
+            )
+            self.assertEqual(session.errors.getvalue(), "")
+        finally:
+            session.close()
+
+    def test_history_shows_current_conversation_without_model_request(self):
+        client = Mock(complete=Mock(side_effect=[reply("历史回答。")]))
+        session = CLISession(client, lines=("历史问题\n",))
+        try:
+            self.assertTrue(session.output.wait_for("DeepSeek > 历史回答。"))
+            session.input.send("/history\n")
+            self.assertTrue(session.output.wait_for("当前对话历史："))
+            output = session.output.getvalue()
+            self.assertIn("你：历史问题", output)
+            self.assertIn("DeepSeek：历史回答。", output)
+            session.close()
+            client.complete.assert_called_once()
+            self.assertEqual(session.errors.getvalue(), "")
+        finally:
+            session.close()
+
+    def test_model_command_lists_and_switches_provider(self):
+        switched = Mock(
+            model="glm-5.3-flash",
+            label="GLM",
+            pricing={
+                "input_hit_per_million": 0,
+                "input_miss_per_million": 0,
+                "output_per_million": 0,
+                "currency": "CNY",
+            },
+        )
+        output = StringIO()
+        errors = StringIO()
+        with patch("harness.cli.ChatCompletionClient", return_value=switched) as factory, patch(
+            "harness.cli.load_glm_api_key", return_value="glm-test-key"
+        ):
+            run_cli(
+                Mock(),
+                input_stream=StringIO("/model\n/model deepseek\n/model glm\n/model invalid\n/exit\n"),
+                output=output,
+                error_output=errors,
+            )
+        text = output.getvalue()
+        self.assertIn("Current model: deepseek-flash", text)
+        self.assertIn("glm — glm-5.3-flash (GLM)", text)
+        self.assertIn("当前已使用 deepseek。", text)
+        self.assertNotIn("已切换到 deepseek-flash", text)
+        self.assertIn("已切换到 glm-5.3-flash（GLM）。", text)
+        self.assertIn("用法：/model [deepseek|glm]", text)
+        factory.assert_called_once_with("glm-test-key", provider="glm")
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_tools_command_lists_available_tools_without_model_request(self):
+        client = Mock()
+        output = StringIO()
+        errors = StringIO()
+        run_cli(
+            client,
+            input_stream=StringIO("/tools\n/exit\n"),
+            output=output,
+            error_output=errors,
+        )
+        text = output.getvalue()
+        self.assertIn("Available tools (", text)
+        self.assertIn("read_file", text)
+        self.assertIn("bash", text)
+        client.complete.assert_not_called()
         self.assertEqual(errors.getvalue(), "")
 
     def test_mode_command_switches_auto_and_rejects_invalid_value(self):

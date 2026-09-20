@@ -139,6 +139,23 @@ class UsageLedgerTests(unittest.TestCase):
         for text in ("高峰价", "低谷价", "USD 0.00045720", "按 API 响应创建时间估算", "跨时段费用可能有差异", "仅保存在内存中", "2026-09-18"):
             self.assertIn(text, output)
 
+    def test_mixed_provider_currencies_are_reported_separately(self):
+        ledger = UsageLedger(pricing=FIXED_PRICING)
+        record_usage(ledger, model="deepseek-test")
+        ledger.pricing = {
+            "input_hit_per_million": 0,
+            "input_miss_per_million": 1,
+            "output_per_million": 2,
+            "currency": "CNY",
+        }
+        record_usage(ledger, model="glm-test")
+        output = format_cost(ledger)
+        self.assertIn("预估费用小计：", output)
+        self.assertIn("  USD ", output)
+        self.assertIn("  CNY ", output)
+        self.assertIn("未跨币种相加", output)
+        self.assertNotIn("预估费用合计：", output)
+
     def test_missing_creation_time_uses_record_time(self):
         timestamp = created_at("2026-09-18T06:00:00Z")
         with patch("harness.usage.time.time", return_value=timestamp):

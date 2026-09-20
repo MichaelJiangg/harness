@@ -17,8 +17,9 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from .background import BackgroundManager, COMPLETED
-from .client import DEFAULT_MODEL
-from .config import get_settings
+from .client import ChatCompletionClient, DEFAULT_MODEL
+from .commands import CommandContext, command_entries, resolve_command
+from .config import get_settings, load_api_key, load_glm_api_key
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .hooks import HookManager
 from .mcp import MCPManager, load_server_configs
@@ -35,6 +36,27 @@ from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
 from .tools.swarm import DEFAULT_ROLES as DEFAULT_SWARM_ROLES
 from .usage import UsageLedger, format_cost, format_usage
 
+_BUILTIN_COMMAND_HELP = {
+    "/mode": "切换权限模式；auto 模式信任当前或指定工作目录",
+    "/memory": "查看和管理本地会话记忆",
+    "/recall": "按语义搜索历史会话记忆",
+    "/skill": "查看和激活可复用技能包",
+    "/notes": "查看和编辑项目长期笔记",
+    "/activity": "查看后台工具、请求和编排活动",
+    "/mcp": "查看外部工具服务器连接状态",
+    "/exit": "退出并停止后续模型和工具调用",
+}
+
+
+def _format_command_help():
+    entries = {command.name: command.help for command in command_entries()}
+    entries.update(_BUILTIN_COMMAND_HELP)
+    lines = ["Available commands:"]
+    for name in sorted(entries):
+        lines.append(f" {name:<12}  {entries[name]}")
+    return "\n".join(lines)
+
+
 HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工具权限由 pyproject.toml 配置。
 默认低风险读取和已识别的只读命令直接放行，中风险操作确认，破坏性命令醒目警告后确认。
 权限规则按禁止优先、数值优先级匹配，首条命中生效；目录授权可免除写入确认。
@@ -47,17 +69,9 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 耗时测试、批量命令和大型独立分析可通过 background_submit 提交后台，background_check 查询状态和结果。
 多角色接力任务可通过 swarm 启动团队协作，角色拥有独立上下文并按交接协议传递成果。
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
-/mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
-/memory [list|show <id>|delete <id> --yes|clear --yes]  查看和管理本地会话记忆
-/recall <query> [--limit N] [--threshold T]  按语义搜索历史会话记忆
-/skill [list|off|<技能名>]  查看和激活可复用技能包
-/notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
-/activity [latest|all|clear]  查看后台工具、请求和编排活动
-/mcp  查看外部工具服务器连接状态
-/cost  查看本次会话 token、USD 预估费用及逐请求明细
-/compact  压缩旧对话，保留最近几轮
-/help  查看帮助
-/exit  退出并停止后续模型和工具调用"""
+交互终端输入：回车换行，连续两个空行发送；模型执行期间的确认与本地命令仍为单行即时响应。
+
+{_format_command_help()}"""
 
 PRODUCT_NAME = "Delin Harness"
 PRODUCT_SUBTITLE = "Powered by Deepseek"
@@ -240,6 +254,14 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 console.print(Text("你", style="bold cyan"), end=" ")
                 console.print(Text(">", style="bold cyan"), end=" ")
                 prompt_shown = True
+
+    def show_continuation_prompt(line_number):
+        if terminal and not input_closed and not abort.is_set():
+            with output_lock:
+                console.print(
+                    Text(f"... {line_number}│", style="bold cyan"),
+                    end=" ",
+                )
 
     def stop_stream_live():
         nonlocal stream_live
@@ -1137,6 +1159,127 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 stop_stream_live()
             show_prompt()
 
+    def switch_model(target):
+        nonlocal client, active_model, active_label, active_subtitle, active_pricing
+        current_provider = "deepseek" if active_label == "DeepSeek" else "glm"
+        if target == current_provider:
+            write(f"当前已使用 {target}。")
+            return False
+        api_key = load_api_key() if target == "deepseek" else load_glm_api_key()
+        if not isinstance(api_key, str) or not api_key.strip():
+            key_name = "DEEPSEEK_API_KEY" if target == "deepseek" else "GLM_API_KEY"
+            raise ValueError(f"未配置 {key_name}，无法切换到 {target}。")
+        new_client = ChatCompletionClient(api_key, provider=target)
+        client = new_client
+        active_model = new_client.model
+        active_label = new_client.label
+        active_subtitle = "Deepseek" if active_label == "DeepSeek" else active_label
+        active_pricing = new_client.pricing
+        if isinstance(active_pricing, dict) and hasattr(ledger, "pricing"):
+            ledger.pricing = active_pricing
+        return True
+
+    def reset_conversation():
+        nonlocal messages
+        query_base = base_system_content
+        if active_skill is not None:
+            query_base += (
+                "\n\n## 当前激活技能\n"
+                f"技能名称：{active_skill.name}\n"
+                f"技能说明：{active_skill.description}\n"
+                f"技能提示：\n{active_skill.prompt}"
+            )
+        messages = [{
+            "role": "system",
+            "content": (
+                query_base
+                if semantic_memory
+                else memory_system_prompt(query_base, memory_records)
+            ),
+        }]
+
+    def format_history():
+        entries = messages[1:]
+        if not entries:
+            return "当前对话为空。"
+        role_names = {
+            "user": "你",
+            "assistant": active_label,
+            "tool": "工具",
+            "system": "系统",
+        }
+        lines = ["当前对话历史："]
+        for index, message in enumerate(entries, 1):
+            role = role_names.get(message.get("role"), message.get("role", "未知"))
+            content = str(message.get("content", ""))
+            if message.get("role") == "tool" and message.get("tool_call_id"):
+                content = f"调用 {message['tool_call_id']}：{content}"
+            content = _preview_text(content, multiline=True)
+            if len(content) > 4000:
+                content = content[:3997] + "..."
+            lines.append(f"[{index}] {role}：{content}")
+        return "\n".join(lines)
+
+    def format_tools():
+        if not available_tool_definitions:
+            return "当前没有可用工具。"
+        lines = [f"Available tools ({len(available_tool_definitions)}):"]
+        for definition in available_tool_definitions:
+            function = definition.get("function", {}) if isinstance(definition, dict) else {}
+            name = _preview_text(str(function.get("name", "unknown")), multiline=False)
+            description = str(function.get("description", "")).strip()
+            summary = description.splitlines()[0] if description else "无说明"
+            summary = _preview_text(summary, multiline=False)
+            if len(summary) > 180:
+                summary = summary[:177] + "..."
+            lines.append(f"  {name} — {summary}")
+        return "\n".join(lines)
+
+    def start_manual_compaction():
+        nonlocal worker
+        if worker and worker.is_alive():
+            write("上一轮查询进行中，暂时无法压缩；期间可以输入 /cost。")
+            return
+        state = QueryState(
+            client=client, ledger=ledger, turn=turn, abort=abort, on_event=on_event,
+            tool_executor=tool_executor,
+            hooks=hook_manager,
+            tools=available_tool_definitions,
+            model=active_model,
+            messages=deepcopy(messages),
+        )
+        worker = Thread(target=run_query, args=(state,), kwargs={"compact": True}, daemon=True)
+        worker.start()
+
+    model_settings = get_settings()
+    available_models = {
+        "deepseek": {
+            "model": model_settings["model"]["name"],
+            "label": "DeepSeek",
+        },
+        "glm": {
+            "model": model_settings["glm"]["name"],
+            "label": "GLM",
+        },
+    }
+
+    def make_command_context(*, busy):
+        return CommandContext(
+            write=write,
+            messages=messages,
+            active_model=active_model,
+            active_label=active_label,
+            available_models=available_models,
+            switch_model=switch_model,
+            reset_conversation=reset_conversation,
+            format_history=format_history,
+            format_cost=lambda: format_cost(ledger),
+            format_tools=format_tools,
+            compact=start_manual_compaction,
+            help_text=HELP,
+            busy=busy,
+        )
+
     if terminal:
         with output_lock:
             console.print(Panel(
@@ -1194,24 +1337,39 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
     if notes_load_error:
         write(f"[notes] 启动时未加载项目笔记：{notes_load_error}", error=True)
+
+    def finish_eof():
+        cancel_confirmation(close_input=True)
+        # 输入结束仍等待已批准操作的结果；命令自身有有限超时。
+        if worker:
+            worker.join()
+        background_manager.shutdown()
+        close_mcp()
+        save_memory_summary()
+        finish_session_hooks()
+
     try:
         while True:
             if not worker or not worker.is_alive():
                 show_prompt()
-            line = input_stream.readline()
+            busy = worker is not None and worker.is_alive()
+            multiline_input = terminal and not busy
+            if multiline_input:
+                try:
+                    text = _read_multiline_text(input_stream, show_continuation_prompt)
+                except EOFError:
+                    finish_eof()
+                    return
+            else:
+                line = input_stream.readline()
+                if not line:
+                    finish_eof()
+                    return
+                text = line.strip()
             with output_lock:
                 prompt_shown = False
-            if not line:
-                cancel_confirmation(close_input=True)
-                # 输入结束仍等待已批准操作的结果；命令自身有有限超时。
-                if worker:
-                    worker.join()
-                background_manager.shutdown()
-                close_mcp()
-                save_memory_summary()
-                finish_session_hooks()
-                return
-            text = line.strip()
+            if multiline_input and not text.strip():
+                continue
             if text == "/exit":
                 abort.set()
                 cancel_confirmation()
@@ -1224,9 +1382,27 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 save_memory_summary()
                 finish_session_hooks()
                 return
-            if text == "/help":
-                write(HELP)
-            elif text.startswith("/mode") and worker and worker.is_alive():
+            if text.startswith("/"):
+                try:
+                    parts = shlex.split(text)
+                except ValueError:
+                    write("命令包含未闭合的引号，请重新输入。")
+                    continue
+                command = resolve_command(parts[0]) if parts else None
+                if command is not None:
+                    busy = worker is not None and worker.is_alive()
+                    if busy and not command.available_while_busy:
+                        write(
+                            command.busy_message
+                            or f"上一轮查询进行中，暂时无法执行 {parts[0]}；期间可以输入 /cost。"
+                        )
+                        continue
+                    try:
+                        command.handler(make_command_context(busy=busy), parts[1:])
+                    except Exception as error:
+                        write(f"错误：{error}", error=True)
+                    continue
+            if text.startswith("/mode") and worker and worker.is_alive():
                 write("上一轮查询进行中，暂时无法切换权限模式；期间可以输入 /cost。")
             elif text.startswith("/mode"):
                 parts = text.split()
@@ -1260,14 +1436,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 render_mcp_status(total=True)
             elif text.startswith("/activity"):
                 handle_activity_command(text)
-            elif text == "/cost":
-                write(format_cost(ledger))
-                if worker and worker.is_alive():
-                    write("查询进行中：尚未返回的请求用量将在返回后记录。")
-            elif text.startswith("/") and text != "/compact":
+            elif text.startswith("/"):
                 write("未知命令，输入 /help 查看帮助。")
-            elif text == "/compact" and worker and worker.is_alive():
-                write("上一轮查询进行中，暂时无法压缩；期间可以输入 /cost。")
             elif answer_confirmation(text):
                 continue
             elif not text:
@@ -1287,7 +1457,6 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     text = text + "\n\n## 发送前钩子\n" + "\n".join(hook_result.prompts)
                 inject_memory_for_query(text)
                 turn += 1
-                compact = text == "/compact"
                 query_tools = available_tool_definitions
                 if active_skill is not None:
                     allowed = set(active_skill.tools)
@@ -1301,9 +1470,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     hooks=hook_manager,
                     tools=query_tools,
                     model=active_model,
-                    messages=deepcopy(messages) + ([] if compact else [{"role": "user", "content": text}]),
+                    messages=deepcopy(messages) + [{"role": "user", "content": text}],
                 )
-                worker = Thread(target=run_query, args=(state,), kwargs={"compact": compact}, daemon=True)
+                worker = Thread(target=run_query, args=(state,), daemon=True)
                 worker.start()
     except KeyboardInterrupt:
         abort.set()
@@ -1314,6 +1483,20 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         close_mcp()
         finish_session_hooks()
         write("\n查询已停止。")
+
+
+def _read_multiline_text(input_stream, continuation_prompt):
+    """终端模式按行累积，连续两个空行时返回；EOF 抛出 EOFError。"""
+    lines = []
+    while True:
+        raw_line = input_stream.readline()
+        if raw_line == "":
+            raise EOFError
+        line = raw_line.rstrip("\r\n")
+        if line == "" and lines and lines[-1] == "":
+            return "\n".join(lines[:-1])
+        lines.append(line)
+        continuation_prompt(len(lines))
 
 
 def _tool_result_summary(name, result):

@@ -384,7 +384,7 @@ class MCPCLIIntegrationTests(unittest.TestCase):
         with patch("harness.cli.load_server_configs", return_value=([], ".harness/mcp.json")), \
                 patch("harness.cli.MCPManager", return_value=manager):
             session = CLISession(
-                client, lines=("/mcp\n", "/exit\n"),
+                client, lines=("/mcp\n", "\n", "\n", "/exit\n", "\n", "\n"),
                 terminal=True, character_delay=0,
                 run_cli_kwargs={"mcp_enabled": True},
             )

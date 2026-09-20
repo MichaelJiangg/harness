@@ -157,7 +157,7 @@ class BashCLITests(unittest.TestCase):
         session.input.send("/help\n")
         session.input.send("/compact\n")
         self.assertTrue(session.output.wait_for("暂时无法压缩"))
-        self.assertEqual(session.output.getvalue().count("/help  查看帮助"), 1)
+        self.assertEqual(session.output.getvalue().count("显示此帮助信息"), 1)
         session.input.send("yes\n")
         self.assertTrue(session.output.wait_for("正在等待本次命令执行确认"))
         self.assertFalse((self.root / "marker.txt").exists())

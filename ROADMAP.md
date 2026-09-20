@@ -2,12 +2,14 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。V0.9.3 新增本地命令自动发现和终端多行输入：命令处理器按文件注册，`/help` 动态生成；空闲时回车换行、连续两个空行发送，续行显示行号并保留粘贴内容中的内部空行。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.9.2 — Add-新增GLM模型支持](https://github.com/MichaelJiangg/harness/releases/tag/v0.9.2) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.9.2`。
+最近公开版本为 [V0.9.3 — Add-多行输入fix](https://github.com/MichaelJiangg/harness/releases/tag/v0.9.3) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.9.3`。
 
 ## 已完成
 
+- 完成终端多行输入：空闲时回车换行，连续两个空行发送；续行前显示行号，粘贴多行内容保留内部空行，模型运行期间确认和本地命令保持单行即时响应，管道协议不变。全量 605 项离线测试通过。
+- 完成本地命令扩展：新增 `harness/commands/` 自动发现注册表，命令处理器通过 `@register()` 注册，`cli.py` 统一分发；新增 `/clear`、`/history`、`/model`、`/tools`，并把 `/cost`、`/compact`、`/help` 迁入统一分发。全量 601 项离线测试通过。
 - 完成 DeepSeek 与 GLM 双 provider 支持：`HARNESS_PROVIDER` 自动或强制选择，GLM 启用思考模式并将 `cached_tokens` 归一化为既有缓存字段；Bash、Hooks、MCP 子进程同步清理 `GLM_API_KEY`。全量 595 项离线测试通过。
 - 检查工作空间：本项目目录为空；本机 Node.js v22.23.2，原生 fetch、readline 和 node:test 可用。
 - 用户确认 Node.js 零第三方依赖方案及先补规范再实现的顺序。
@@ -145,6 +147,8 @@
 
 ## 最近验证
 
+- 2026-09-20：终端多行输入完成后全量 605 项离线测试通过，覆盖双空行发送、续行行号、粘贴内部空行、管道单行兼容，以及模型运行期间确认和本地命令仍即时响应；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
+- 2026-09-20：本地命令扩展完成后全量 601 项离线测试通过，覆盖命令自动发现、`/clear` 清空后下一轮上下文、`/history` 展示、`/model` 查看与切换、`/tools` 列表、混合 provider 币种分账，以及等待确认期间本地命令不误批准；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.2 已发布。远端 `main` 提交为 `460914283dc92b116470bb4ae1912c895df299c5`，注解标签对象为 `dde5ff7d936d8da42ff364287f955c33886ca0c4`，标签 `v0.9.2` 指向该提交；Release「V0.9.2 - Add-新增GLM模型支持」为正式版、非草稿并作为 Latest。
 - 2026-09-20：GLM 双 provider 支持完成后全量 595 项离线测试通过，覆盖 `HARNESS_PROVIDER` 自动选择与强制指定、缺失密钥错误、GLM 请求契约、思考模式开关和 `cached_tokens` 缓存字段归一化；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.1 已发布。远端 `main` 提交为 `772f65a6b783b5e89e6360e30fdd6700cfaf6613`，注解标签对象为 `828382f50105c7508ef3b6b1d1f577f86a21aa06`，标签 `v0.9.1` 指向该提交；Release「V0.9.1 - Add-进度反馈、速度提升」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。

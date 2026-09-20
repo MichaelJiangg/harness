@@ -70,6 +70,15 @@ def _summarize(records):
     return summary
 
 
+def _currency_costs(records):
+    costs = {}
+    for record in records:
+        if not record["usage_missing"]:
+            currency = record.get("currency", "USD")
+            costs[currency] = costs.get(currency, 0.0) + record["estimated_cost"]
+    return costs
+
+
 class UsageLedger:
     def __init__(self, pricing=PRICING):
         if not _valid_rates(pricing) or ("peak" in pricing and not _valid_rates(pricing["peak"])):
@@ -159,14 +168,25 @@ def format_cost(ledger):
     summary = _summarize(records)
     pricing = ledger.pricing
     currency = pricing.get("currency", "USD")
+    currency_costs = _currency_costs(records)
+    cost_currency = next(iter(currency_costs)) if len(currency_costs) == 1 else None
     subtotal = "已知小计" if summary["missing_usage_requests"] else "合计"
     lines = [
         "本次会话用量与费用（仅保存在内存中，退出后不保留）",
         f"模型请求：{summary['requests']} 次。",
         f"Token {subtotal}：输入 {summary['prompt_tokens']}，输出 {summary['completion_tokens']}，合计 {summary['total_tokens']}。",
         f"输入缓存{subtotal}：命中 {summary['cache_hit_tokens']}，未命中 {summary['cache_miss_tokens']}。",
-        f"预估费用{subtotal}：{currency} {summary['estimated_cost']:.8f}，以实际账单为准。",
     ]
+    if len(currency_costs) > 1:
+        lines.append("预估费用小计：")
+        for cost_currency, cost in sorted(currency_costs.items()):
+            lines.append(f"  {cost_currency} {cost:.8f}")
+        lines.append("模型切换后按 provider 币种分别统计，未跨币种相加；以实际账单为准。")
+    else:
+        displayed_currency = cost_currency or currency
+        lines.append(
+            f"预估费用{subtotal}：{displayed_currency} {summary['estimated_cost']:.8f}，以实际账单为准。"
+        )
     if summary["missing_usage_requests"]:
         lines.append(
             f"{summary['missing_usage_requests']} 次请求用量缺失或无效，未计入小计；这些请求的 token 与费用未知。"

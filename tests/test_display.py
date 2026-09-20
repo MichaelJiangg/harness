@@ -37,7 +37,7 @@ class DisplayTests(unittest.TestCase):
 
         with patch("harness.cli.Event", return_value=abort), \
                 patch.object(abort, "wait", return_value=False) as wait:
-            run_cli(Mock(complete=complete), input_stream=TerminalBuffer("问题\n"), output=output)
+            run_cli(Mock(complete=complete), input_stream=TerminalBuffer("问题\n\n\n"), output=output)
         self.assertEqual(wait.call_args_list, [call(0.02), call(0.02), call(0.02)])
         self.assertIn("甲乙丙", output.getvalue())
         self.assertLess(output.getvalue().index("甲"), output.getvalue().index("乙"))
@@ -105,7 +105,7 @@ class DisplayTests(unittest.TestCase):
 
         with patch("harness.cli.Event", return_value=abort), \
                 patch.object(abort, "wait", return_value=False):
-            run_cli(Mock(complete=complete), input_stream=TerminalBuffer("请解释\n"), output=output)
+            run_cli(Mock(complete=complete), input_stream=TerminalBuffer("请解释\n\n\n"), output=output)
         text = visible_text(output.getvalue())
         self.assertIn("快速排序", text)
         self.assertIn("平均复杂度", text)
