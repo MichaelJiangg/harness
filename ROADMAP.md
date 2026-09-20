@@ -153,6 +153,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V1.0 已发布。远端 `main` 提交为 `4a4eb5fb294e358ac7e8633add596643d145ab0b`，注解标签对象为 `7211645be116249a2a4baaa9f35281f974271b4b`，标签 `v1.0` 指向该提交；Release「V1.0 - 版本发布」为正式版、非草稿并作为 Latest。
 - 2026-09-21：打包发布准备完成后全量 602 项离线测试通过；`python3 -m pip wheel --no-deps .` 生成 `michael_harness-0.10.3-py3-none-any.whl`，独立 venv 安装后 `harness --version` 正常，首次 `--show-config` 自动创建权限为 0600 的注释版配置；editable 安装后 `harness --version` 正常。`compileall` 与 `git diff --check` 通过。
 - 2026-09-20：V0.10.3 已发布。远端 `main` 提交为 `7ab872a6c6b432f9e68a33ab4f74ab9380186a30`，注解标签对象为 `d1e831f304378756f5a02f3d4e5064b80603219e`，标签 `v0.10.3` 指向该提交；Release「V0.10.3 - Add-启动流程」为正式版、非草稿并作为 Latest。
 - 2026-09-20：健壮启动流程完成后全量 599 项离线测试通过，覆盖必需模块失败退出、Hooks／记忆警告降级、MCP 连接失败报告、报告格式和 `--check` 参数；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
