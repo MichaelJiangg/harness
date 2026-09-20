@@ -148,6 +148,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.9.3.1 已发布。远端 `main` 提交为 `648abb6eb7f67f8a4602fd240b9da65fd4119fd6`，注解标签对象为 `3769040821140279b36f6a0fd964fb40fbfadd2f`，标签 `v0.9.3.1` 指向该提交；Release「V0.9.3.1 - bugfix」为正式版、非草稿并作为 Latest。
 - 2026-09-20：单行发送与多行识别优化完成后全量 617 项离线测试通过，覆盖普通单行一次回车、`\` 显式续行、粘贴后待读输入识别、内部空行保留、readline 行内编辑路径和 prompt 保护；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.3 已发布。远端 `main` 提交为 `06be8ef342d934d8a52bf87b759c69c1ad89ee27`，注解标签对象为 `54bc0045a361fe2d154c7127ef4f9432aa013afc`，标签 `v0.9.3` 指向该提交；Release「V0.9.3 - Add-多行输入fix」为正式版、非草稿并作为 Latest。
 - 2026-09-20：终端多行输入完成后全量 605 项离线测试通过，覆盖双空行发送、续行行号、粘贴内部空行、管道单行兼容，以及模型运行期间确认和本地命令仍即时响应；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
