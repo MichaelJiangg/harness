@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.8 — Add-MCP](https://github.com/MichaelJiangg/harness/releases/tag/v0.8) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.8`。
+最近公开版本为 [V0.9.1 — Add-进度反馈、速度提升](https://github.com/MichaelJiangg/harness/releases/tag/v0.9.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.9.1`。
 
 ## 已完成
 
@@ -122,6 +122,9 @@
 - 修复外部 MCP 工具名含冒号导致 DeepSeek HTTP 400 的问题：模型侧工具名归一化为 `mcp_<server>_<tool>`，并处理重连后的名称稳定性。
 - MCP 子进程默认不继承 DeepSeek/Tavily 密钥和动态加载器环境并持续排空 stderr；外部 Schema 关闭本地子集校验，权限、确认、审计和结果预算仍由统一执行器控制。
 - 新增 MCP 配置加载、状态查询、自动重连、环境引用和 CLI 合并转发回归，全量 587 项离线测试通过，并用本地临时 MCP 子进程和默认 Tavily MCP 完成真实 stdio 握手；未发起计费搜索或真实 DeepSeek API。
+- 新增终端进度反馈：等待模型时显示 Rich 旋转动画，收到流式文字后切换逐字回答；主查询直接工具调用显示名称、脱敏参数、状态和耗时，内部编排工具继续静默并进入活动日志。
+- 引擎新增 `tool_start` 事件，在工具执行前发出并携带统一 `call_id`。
+- MCP 初始连接改为后台执行，提示符立即显示；首个提问最多等待 3 秒完成首次连接和工具刷新，超时先用内置工具。新增延迟连接、首个提问等待和进度回归，全量 591 项离线测试通过。
 
 ## 进行中
 
@@ -141,6 +144,7 @@
 
 ## 最近验证
 
+- 2026-09-20：进度反馈和异步 MCP 启动完成后全量 591 项离线测试通过，覆盖等待动画、逐字输出顺序、主查询工具参数与耗时显示、管道模式不受限速、`tool_start` 与 `tool` 事件顺序、延迟 MCP 连接、首个提问等待与工具刷新；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。启动退出实测由约 2.7 秒降至约 0.23 秒。未提交、推送或发布。
 - 2026-09-20：V0.8 已发布。远端 `main` 提交为 `c804bbe822a38903c063e98063bfc862528febb4`，注解标签对象为 `4bfbb94748b3123e1ffaa5be68c654a7b0bc5ba9`，标签 `v0.8` 指向该提交；Release「V0.8 - Add-MCP」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：统一 MCP 配置与自动重连完成后全量 587 项离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、进程退出重连、外部 Schema、DeepSeek 工具名归一化、CLI 合并转发和环境密钥引用；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。另用项目 `.env` 和本地 `.harness/mcp.json` 完成 `tavily-mcp@0.2.22` 真实 stdio 握手并发现 5 个工具；带全部外部工具的 DeepSeek 请求由 HTTP 400 修复为 200，Harness 实际对话返回正常。未发起 Tavily 计费搜索。
 - 2026-09-20：V0.7.2 已发布。远端 `main` 提交为 `a3d3f96a99b949e0031856f09a2a2a2cf0dfadd3`，注解标签对象为 `9229edcad8879a38f4c7866ccfa82e94c682f443`，标签 `v0.7.2` 指向该提交；Release「V0.7.2 - Add-Hooks And Skill」为正式版、非草稿并作为 Latest。远端发布树与本地 100 个 blob 的路径、mode 和 SHA 逐项一致。

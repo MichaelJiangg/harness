@@ -124,7 +124,7 @@ class MCPServer:
         result = self._request("initialize", {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
-            "clientInfo": {"name": "harness", "version": "0.8.0"},
+            "clientInfo": {"name": "harness", "version": "0.9.1"},
         })
         self._notify("notifications/initialized", {})
         return result
@@ -278,7 +278,7 @@ def _resolve_env_value(config, raw_value):
 
 
 class MCPManager:
-    def __init__(self, configs, *, reconnect=True, on_change=None):
+    def __init__(self, configs, *, reconnect=True, on_change=None, connect=True):
         self._configs = tuple(configs)
         self._config_by_name = {config.name: config for config in self._configs}
         if len(self._config_by_name) != len(self._configs):
@@ -299,8 +299,8 @@ class MCPManager:
             config.name: MCPServerStatus(config.name) for config in self._configs
         }
         self._on_change = on_change
-        for config in self._configs:
-            self._connect(config)
+        if connect:
+            self.connect_all()
         if reconnect:
             for config in self._configs:
                 monitor = Thread(
@@ -309,6 +309,12 @@ class MCPManager:
                 )
                 self._monitors.append(monitor)
                 monitor.start()
+
+    def connect_all(self):
+        for config in self._configs:
+            if self._stop_event.is_set():
+                return
+            self._connect(config)
 
     @property
     def servers(self):

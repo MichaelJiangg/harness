@@ -143,6 +143,12 @@ def query_loop(state):
                 display_arguments = json.loads(call["function"]["arguments"])
             except json.JSONDecodeError:
                 display_arguments = {}
+            state.on_event({
+                "type": "tool_start",
+                "name": call["function"]["name"],
+                "arguments": display_arguments,
+                "call_id": call["id"],
+            })
             result = _execute_call(state, call)
             if (call["function"]["name"] == "read_file" and result.get("status") == "success"
                     and isinstance(result.get("path"), str) and type(result.get("eof")) is bool
@@ -162,6 +168,7 @@ def query_loop(state):
             state.on_event({
                 "type": "tool", "name": call["function"]["name"],
                 "arguments": display_arguments, "result": displayed_result,
+                "call_id": call["id"],
             })
 
     raise QueryAborted("查询已停止。")

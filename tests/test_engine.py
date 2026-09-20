@@ -51,6 +51,27 @@ class QueryLoopTests(unittest.TestCase):
         self.assertEqual(state.messages[-1]["content"], "最终回答")
         self.assertEqual([event["type"] for event in events], ["response_start", "usage"])
 
+    def test_tool_start_event_precedes_tool_result_and_keeps_call_id(self):
+        events = []
+        state = self.make_state(
+            [reply(None, [tool_call()]), reply("工具已完成。")],
+            on_event=events.append,
+            tool_executor=lambda name, arguments: {
+                "status": "success", "executed": True, "tool": name,
+            },
+        )
+        self.assertEqual(query_loop(state), "工具已完成。")
+        start = next(event for event in events if event["type"] == "tool_start")
+        result = next(event for event in events if event["type"] == "tool")
+        self.assertEqual(start["name"], "test_read")
+        self.assertEqual(start["arguments"], {"path": "example.txt"})
+        self.assertEqual(start["call_id"], "call-1")
+        self.assertEqual(result["call_id"], "call-1")
+        self.assertLess(
+            events.index(start),
+            events.index(result),
+        )
+
     def test_system_prompt_requires_delegate_for_directory_analysis(self):
         self.assertIn("目录级分析", SYSTEM_PROMPT)
         self.assertIn("代码质量审查", SYSTEM_PROMPT)

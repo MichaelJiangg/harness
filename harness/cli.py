@@ -7,11 +7,13 @@ from copy import deepcopy
 from functools import partial
 from pathlib import Path
 from threading import Event, Lock, Thread
+from time import monotonic
 
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.text import Text
 
 from .background import BackgroundManager, COMPLETED
@@ -82,6 +84,7 @@ BRIEF_HELP = """直接输入任务开始：
 
 ACTIVITY_DEFAULT_COUNT = 50
 ACTIVITY_MAX_EVENTS = 500
+MCP_READY_TIMEOUT = 3
 
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
@@ -96,6 +99,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     mcp_settings = get_settings()["mcp"]
     mcp_enabled = mcp_enabled and mcp_settings["enabled"]
     mcp_manager = None
+    mcp_connect_thread = None
+    mcp_initial_ready = None
     mcp_errors = []
     mcp_definitions = []
     mcp_config_source = "pyproject.toml"
@@ -105,10 +110,24 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         mcp_manager = MCPManager(
             configs,
             on_change=lambda *_: mcp_change_event.set(),
+            connect=False,
         )
         mcp_definitions = mcp_manager.tool_definitions()
         mcp_errors = mcp_manager.load_errors
         mcp_change_event.clear()
+        mcp_initial_ready = Event()
+
+        def connect_mcp_servers():
+            try:
+                mcp_manager.connect_all()
+            finally:
+                mcp_initial_ready.set()
+
+        mcp_connect_thread = Thread(
+            target=connect_mcp_servers, daemon=True,
+            name="harness-mcp-startup",
+        )
+        mcp_connect_thread.start()
     ledger = ledger if ledger is not None else UsageLedger()
     input_stream = input_stream if input_stream is not None else sys.stdin
     output = output if output is not None else sys.stdout
@@ -196,6 +215,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     response_streamed = False
     stream_buffer = ""
     stream_live = None
+    tool_started_at = {}
+    skip_next_response_start = False
     prompt_shown = False
     input_closed = False
     session_ended = False
@@ -332,14 +353,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             stop_stream_live()
             stream_buffer = ""
             stream_live = Live(
-                Panel(
-                    Markdown("", code_theme="monokai"),
-                    title="Assistant",
-                    border_style="cyan",
-                    padding=(0, 1),
-                ),
+                Spinner("dots", text="思考中..."),
                 console=console,
-                auto_refresh=False,
                 vertical_overflow="visible",
             )
             stream_live.start()
@@ -360,12 +375,15 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         with output_lock:
             if stream_live is not None:
                 try:
-                    stream_live.update(Panel(
-                        Markdown(stream_buffer, code_theme="monokai", justify="left"),
-                        title="Assistant",
-                        border_style="cyan",
-                        padding=(0, 1),
-                    ))
+                    stream_live.update(
+                        Panel(
+                            Markdown(stream_buffer, code_theme="monokai", justify="left"),
+                            title="Assistant",
+                            border_style="cyan",
+                            padding=(0, 1),
+                        ),
+                    )
+                    stream_live.auto_refresh = False
                     stream_live.refresh()
                 except Exception:
                     pass
@@ -823,6 +841,12 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     tool_executor = build_tool_executor()
 
+    def close_mcp():
+        if mcp_manager is not None:
+            mcp_manager.close()
+        if mcp_connect_thread is not None and mcp_connect_thread.is_alive():
+            mcp_connect_thread.join(timeout=1)
+
     def refresh_mcp_tools():
         nonlocal mcp_definitions, mcp_errors, available_tool_definitions, tool_executor
         mcp_definitions = mcp_manager.tool_definitions()
@@ -868,7 +892,56 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 style="cyan",
             )
 
+    def render_tool_start(event):
+        name = event.get("name", "tool")
+        arguments = event.get("arguments", {})
+        try:
+            rendered = json.dumps(arguments, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            rendered = str(arguments)
+        rendered = _preview_text(rendered)
+        if len(rendered) > 1000:
+            rendered = rendered[:997] + "..."
+        if terminal:
+            write(f"⚙ 执行工具：{name}", style="blue")
+            lines = rendered.splitlines() or [""]
+            write(f"  参数：{lines[0]}", style="dim")
+            for line in lines[1:]:
+                write(f"        {line}", style="dim")
+        else:
+            write(f"[tool] {name}：{rendered}")
+
+    def render_tool_result(event):
+        name = event.get("name", "tool")
+        result = event.get("result", {})
+        call_id = event.get("call_id")
+        key = call_id if isinstance(call_id, str) else name
+        started_at = tool_started_at.pop(key, None)
+        elapsed = monotonic() - started_at if started_at is not None else None
+        success = result.get("status") == "success"
+        summary = _tool_result_summary(name, result)
+        summary = _preview_text(summary, multiline=False)
+        if len(summary) > 300:
+            summary = summary[:297] + "..."
+        if terminal:
+            marker = "✓" if success else "✗"
+            verb = "完成" if success else "失败"
+            line = f"  {marker} {verb}（{_format_elapsed(elapsed)}）"
+            if summary:
+                line += f" — {summary}"
+            write(line, style="green" if success else "red")
+        else:
+            marker = "done" if success else "failed"
+            line = f"[tool] {name}：{marker}（{_format_elapsed(elapsed)}）"
+            if summary:
+                line += f" — {summary}"
+            write(line)
+        message = _activity_message(event)
+        if message:
+            record_activity(message, "tool")
+
     def on_event(event):
+        nonlocal skip_next_response_start
         if abort.is_set():
             return
         agent = event.get("agent")
@@ -910,8 +983,24 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                             f"[hook] post_tool_call: auto-formatted {path} with {formatter}",
                             style="magenta",
                         )
+        if (delegated or background or swarm) and event["type"] == "tool_start":
+            return
+        if (delegated or background or swarm) and event["type"] == "tool":
+            message = _activity_message(event)
+            if message:
+                record_activity(message, "tool")
+            return
+        if event["type"] == "tool_start":
+            call_id = event.get("call_id")
+            key = call_id if isinstance(call_id, str) else event.get("name", "tool")
+            tool_started_at[key] = monotonic()
+            render_tool_start(event)
+            return
+        if event["type"] == "tool":
+            render_tool_result(event)
+            return
         hidden_types = {
-            "tool", "usage", "compact_start", "compact_done", "compact_skipped",
+            "usage", "compact_start", "compact_done", "compact_skipped",
         }
         if event["type"] in hidden_types:
             message = _activity_message(event)
@@ -979,6 +1068,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             message_text = _preview_text(event["message"], multiline=False)
             write(f"[delegate] 子任务失败：{description}；{message_text}", style="red")
         elif event["type"] == "response_start":
+            if skip_next_response_start:
+                skip_next_response_start = False
+                return
             start_stream()
         elif event["type"] == "text":
             fragments = event["text"] if terminal else (event["text"],)
@@ -997,12 +1089,26 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             )
 
     def run_query(state, *, compact=False):
-        nonlocal messages, response_streamed
+        nonlocal messages, response_streamed, skip_next_response_start
         try:
             if compact:
                 if compact_history(state, force=True) and not abort.is_set():
                     messages = state.messages
                 return
+            if mcp_initial_ready is not None:
+                state.on_event({"type": "response_start"})
+                skip_next_response_start = True
+                mcp_initial_ready.wait(MCP_READY_TIMEOUT)
+                if mcp_change_event.is_set():
+                    mcp_change_event.clear()
+                    refresh_mcp_tools()
+                    state.tools = available_tool_definitions
+                    if active_skill is not None:
+                        allowed = set(active_skill.tools)
+                        state.tools = [
+                            tool for tool in state.tools
+                            if tool["function"]["name"] in allowed
+                        ]
             answer = query_loop(state)
             if not abort.is_set():
                 messages = state.messages
@@ -1048,6 +1154,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 )
                 names = mcp_manager.tool_names(name)
                 write(f"[mcp] Tools merged: {', '.join(names)}", style="cyan")
+            elif status["state"] in {"connecting", "pending"}:
+                write(f"[mcp] Connecting to {name}...", style="cyan")
             else:
                 write(f"[mcp] Connecting to {name}... FAILED", style="red")
                 if status["last_error"]:
@@ -1088,8 +1196,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if worker:
                     worker.join()
                 background_manager.shutdown()
-                if mcp_manager is not None:
-                    mcp_manager.close()
+                close_mcp()
                 save_memory_summary()
                 finish_session_hooks()
                 return
@@ -1100,8 +1207,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if worker:
                     worker.join(timeout=1)
                 background_manager.shutdown()
-                if mcp_manager is not None:
-                    mcp_manager.close()
+                close_mcp()
                 with output_lock:
                     end_stream_line()
                 save_memory_summary()
@@ -1193,8 +1299,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if worker:
             worker.join(timeout=1)
         background_manager.shutdown()
-        if mcp_manager is not None:
-            mcp_manager.close()
+        close_mcp()
         finish_session_hooks()
         write("\n查询已停止。")
 
@@ -1274,6 +1379,14 @@ def _format_uptime(seconds):
         return f"{minutes}m {seconds}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes}m"
+
+
+def _format_elapsed(seconds):
+    if seconds is None or seconds < 0:
+        return "unknown"
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    return f"{seconds:.1f}s"
 
 
 def _confirmation_risk(name, arguments):

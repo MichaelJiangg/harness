@@ -1,10 +1,14 @@
+import json
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event, Thread
 import unittest
 from unittest.mock import Mock, call, patch
 
 from harness.cli import run_cli
 from harness.client import APIError
+from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
 from test_cli import CLISession, reply, visible_text
 
@@ -39,6 +43,33 @@ class DisplayTests(unittest.TestCase):
         self.assertLess(output.getvalue().index("甲"), output.getvalue().index("乙"))
         self.assertLess(output.getvalue().index("乙"), output.getvalue().index("丙"))
         self.assertIn("Assistant", output.getvalue())
+
+    def test_terminal_shows_spinner_and_tool_progress(self):
+        tool_call = {
+            "id": "call_read_1", "type": "function", "function": {
+                "name": "read_file", "arguments": json.dumps({"path": "example.txt"}),
+            },
+        }
+        client = Mock(complete=Mock(side_effect=[
+            reply(None, tool_calls=[tool_call]),
+            reply("读取完成。"),
+        ]))
+        with TemporaryDirectory() as directory:
+            Path(directory, "example.txt").write_text("abc", encoding="utf-8")
+            with patch("harness.cli.create_tool_executor",
+                       return_value=create_tool_executor(directory)):
+                session = CLISession(
+                    client, lines=("读取文件\n",),
+                    terminal=True, character_delay=0,
+                )
+                self.addCleanup(session.close)
+                self.assertTrue(session.output.wait_for("读取完成。"))
+                session.close()
+        output = visible_text(session.output.getvalue())
+        self.assertIn("思考中...", output)
+        self.assertIn("⚙ 执行工具：read_file", output)
+        self.assertIn('"path": "example.txt"', output)
+        self.assertIn("✓ 完成", output)
 
     def test_pipe_output_is_not_artificially_delayed(self):
         abort = Event()

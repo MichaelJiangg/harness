@@ -46,7 +46,7 @@
 - `harness/hooks.py` 从 `.harness/hooks.json` 加载生命周期 Hooks，事件包括会话开始／结束、发送消息前后和工具执行前后；支持 shell、prompt、python，工具事件对主查询和子 Agent 统一生效。
 - `harness/skills.py` 从 `.harness/skills/*.json` 加载技能包，`/skill` 查看、激活和停用；激活后只向当前查询开放技能声明的工具，并注入技能提示词。
 - `harness/presets.py` 提供默认启用的项目约定、写后格式化和会话记忆预置钩子；开关位于 `tool.harness.presets`，格式化优先使用 ruff/black 和本地 prettier。
-- `harness/mcp.py` 统一加载 `.harness/mcp.json`，文件存在时优先于 `pyproject.toml` 回退列表；JSON 按服务器名称声明 `command`、`args` 和 `env`，最多 50 台，格式错误停止启动。通过 stdio 使用 JSON-RPC 2.0 完成 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`，把工具注册为符合 DeepSeek 名称规则的 `mcp_<server>_<tool>` 并合并进当前查询。单个服务器最多 200 个工具，请求默认超时 120 秒；启动或列表失败只跳过该服务器，退出时关闭全部子进程。
+- `harness/mcp.py` 统一加载 `.harness/mcp.json`，文件存在时优先于 `pyproject.toml` 回退列表；JSON 按服务器名称声明 `command`、`args` 和 `env`，最多 50 台，格式错误停止启动。CLI 在后台启动连接，提示符立即出现；首个提问最多等待 3 秒完成首次连接并刷新工具，超时先用内置工具。通过 stdio 使用 JSON-RPC 2.0 完成 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`，把工具注册为符合 DeepSeek 名称规则的 `mcp_<server>_<tool>` 并合并进当前查询。单个服务器最多 200 个工具，请求默认超时 120 秒；启动或列表失败只跳过该服务器，退出时关闭全部子进程。
 - MCP 管理器维护每台服务器的连接状态、工具数量、运行时间、错误和重试次数；每台服务器有独立后台监控线程，异常退出后自动指数退避重连并重新发现工具。`/mcp` 查看状态，不调用模型。重连成功会在空闲时刷新当前执行器和模型工具列表。
 - MCP 子进程默认不继承 DeepSeek/Tavily 密钥和动态加载器环境；配置 `env` 的 `${VARIABLE}` 引用从进程环境或项目 `.env` 解析，缺失或为空时不启动该服务器。外部工具默认中风险询问并可用完整工具名配置 `allow`／`ask`／`deny`，但服务器不受文件工具工作区限制。
 - 无本地 JSON 配置时的默认 MCP 服务器为 `tavily`，使用 `npx -y tavily-mcp@0.2.22` 并通过 `${TAVILY_API_KEY}` 注入 `.env` 密钥；真实密钥不得写入 `.harness/mcp.json`、`pyproject.toml`、日志或 Git。
@@ -55,7 +55,8 @@
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
 - CLI 交互终端输出统一由 `rich` 负责：AI 回答使用 Markdown 面板和代码语法高亮，工具调用展示参数与结构摘要，系统、错误、后台、委托和 Swarm 状态分层配色；管道输出保持无 ANSI 的纯文本。工具事件可携带脱敏参数供终端显示，但不能向模型或日志放宽权限。
-- 工具执行、逐请求用量和压缩事件默认只进入会话内活动日志，不直接打印；`/activity` 可按需展开。委托、后台和 Swarm 保留高层进度，权限确认、错误和 AI 回答保持可见。
+- 主查询直接执行的工具显示开始、脱敏参数、耗时和成功／失败结果；委托、后台和 Swarm 内部工具仍静默并写入活动日志。逐请求用量和压缩事件继续只进入会话内活动日志，`/activity` 可按需展开；权限确认、错误和 AI 回答保持可见。
+- 等待模型响应时显示 Rich 旋转动画；收到流式文字后切换到 Markdown 逐字面板。交互终端保留每字符约 20 毫秒、可取消且不持输出锁；管道输出不人为限速，也不输出动画控制序列。
 - `harness/tools/web_fetch.py` 提供只读公开网页读取，不接受搜索或用户提供的认证信息；拒绝私网、回环、链路本地、非标准端口、重定向、大响应和非文本内容，默认逐次确认。
 - `harness/tools/web_search.py` 通过 Tavily 搜索公开网页；`TAVILY_API_KEY` 仅从环境变量或项目 `.env` 读取，密钥不进入请求日志、权限日志或版本控制，缺失时返回配置错误。
 - 启动界面只显示产品名、模型和一行使用提示，详细权限、工具与命令说明由 `/help` 提供，避免每次启动重复输出长文档。

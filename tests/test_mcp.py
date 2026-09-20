@@ -151,6 +151,24 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(result["content"], "found.pdf")
         self.assertEqual(result["status"], "success")
 
+    def test_manager_can_defer_initial_connections(self):
+        responses = [
+            {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05"}},
+            {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}},
+        ]
+        with patch("harness.mcp.subprocess.Popen",
+                   return_value=FakePopen(responses)) as launch:
+            manager = MCPManager(
+                [MCPServerConfig("filesystem", "fake-server", ())],
+                connect=False, reconnect=False,
+            )
+            self.addCleanup(manager.close)
+            self.assertEqual(manager.servers, [])
+            launch.assert_not_called()
+            manager.connect_all()
+        self.assertEqual(len(manager.servers), 1)
+        self.assertEqual(manager.status()[0]["state"], "connected")
+
     def test_external_schema_skips_local_json_schema_validation(self):
         definition, _ = MCPManager._build_definition("filesystem", {
             "name": "search",
@@ -381,6 +399,59 @@ class MCPCLIIntegrationTests(unittest.TestCase):
         self.assertIn("3 tools", output)
         self.assertIn("uptime: 2m 0s", output)
         self.assertIn("0 external tools", output)
+
+    def test_first_query_waits_for_background_connection_and_refreshes_tools(self):
+        definition = ToolDefinition(
+            "mcp_filesystem_search", "搜索文件。", {
+                "type": "object", "properties": {},
+            },
+            validate_arguments=False,
+        )
+        manager = Mock()
+        manager.tool_definitions.side_effect = [[], [definition]]
+        manager.load_errors = []
+        manager.tool_names.return_value = []
+        manager.status.return_value = [{
+            "name": "filesystem",
+            "state": "connected",
+            "tool_count": 1,
+            "uptime_seconds": 1,
+            "last_error": None,
+            "attempts": 1,
+        }]
+        connect_started = Event()
+        release_connection = Event()
+
+        def manager_factory(configs, *, on_change=None, connect=False):
+            manager.on_change = on_change
+            return manager
+
+        def connect_all():
+            connect_started.set()
+            if not release_connection.wait(3):
+                raise AssertionError("Test did not release MCP connection")
+            manager.on_change("filesystem", manager.status.return_value[0])
+
+        manager.connect_all.side_effect = connect_all
+        client = Mock(complete=Mock(return_value=reply("回答完成。")))
+        with patch("harness.cli.load_server_configs", return_value=([], ".harness/mcp.json")), \
+                patch("harness.cli.MCPManager", side_effect=manager_factory):
+            session = CLISession(
+                client, lines=("你好\n",),
+                terminal=False, character_delay=0,
+                run_cli_kwargs={"mcp_enabled": True},
+            )
+            self.addCleanup(session.close)
+            self.assertTrue(connect_started.wait(3))
+            self.assertFalse(client.complete.called)
+            release_connection.set()
+            self.assertTrue(session.output.wait_for("回答完成。"))
+            session.close()
+        tool_names = [
+            item["function"]["name"]
+            for item in client.complete.call_args_list[0].kwargs["tools"]
+        ]
+        self.assertIn(definition.name, tool_names)
 
 
 if __name__ == "__main__":
