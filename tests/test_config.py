@@ -126,18 +126,27 @@ class ConfigTests(unittest.TestCase):
 
     def test_main_passes_loaded_key_to_client(self):
         with patch("sys.argv", ["harness"]):
-            with patch.object(entrypoint, "select_model_provider",
-                              return_value=("deepseek", "test-value")) as select:
-                with patch("harness.client.ChatCompletionClient") as client:
-                    with patch("harness.cli.run_cli") as run_cli:
+            with patch("harness.app.select_model_provider",
+                       return_value=("deepseek", "test-value")) as select:
+                with patch("harness.app.ChatCompletionClient") as client:
+                    with patch("harness.app.run_cli") as run_cli:
                         self.assertEqual(entrypoint.main(), 0)
         select.assert_called_once_with()
         client.assert_called_once_with("test-value", provider="deepseek")
         run_cli.assert_called_once_with(
             client.return_value,
+            ledger=None,
+            input_stream=None,
+            output=None,
+            error_output=None,
+            character_delay=None,
             memory_enabled=True,
+            memory_store=None,
             notes_enabled=True,
+            notes_store=None,
+            vector_store=None,
             hooks_enabled=True,
+            hooks_manager=None,
             mcp_enabled=True,
         )
 

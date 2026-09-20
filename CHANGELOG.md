@@ -1,5 +1,12 @@
 # 版本记录
 
+## V0.10.1 — Add-连接所有模块
+
+Git 标签：`v0.10.1`。
+
+- 新增第十部分组装入口 `harness/app.py`：`create_app()` 加载配置、选择 provider 并创建客户端，返回唯一 `start()` 函数；`start()` 统一启用权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染。
+- `python -m harness` 改为调用 `create_app()()`，保留 `--help` 无密钥启动行为和配置错误先于密钥加载的约束。
+
 ## V0.9.3.1 — bugfix
 
 Git 标签：`v0.9.3.1`。

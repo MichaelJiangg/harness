@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.9.3.1 — bugfix**（Git 标签 `v0.9.3.1`）。修复 Esc 中断、普通输入编辑和多行输入切换体验。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.10.1 — Add-连接所有模块**（Git 标签 `v0.10.1`）。新增 `harness/app.py` 统一组装入口。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -71,6 +71,15 @@ python3 -m harness
 | `/exit` | 退出，停止后续模型和工具调用 |
 
 `python3 -m harness --help` 无需密钥即可查看帮助。支持单条管道输入，输入流结束后会等待回答；交互中一次处理一个问题，繁忙时的新问题会被提示稍后重发。
+
+完整生命周期通过 `harness.app.create_app()` 组装。`create_app()` 加载配置并创建当前 provider 客户端，返回唯一启动函数；启动函数再打开权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染：
+
+```python
+from harness.app import create_app
+
+start = create_app()
+start()
+```
 
 本地命令放在 `harness/commands/`，每个命令一个文件，通过 `@register("/命令名", "说明")` 注册。启动时自动发现目录内文件并加入 `/help`；新增命令不需要修改 `harness/cli.py`。
 
@@ -664,6 +673,7 @@ GLM 的 `glm-5.3-flash` 目前配置在 `pyproject.toml` 的 `tool.harness.glm.p
 | --- | --- |
 | `pyproject.toml` | 项目元信息和非密钥运行默认配置 |
 | `harness/__main__.py` | 读取配置并启动程序 |
+| `harness/app.py` | 组装配置、模型客户端和完整 CLI 生命周期，暴露 `create_app` |
 | `harness/config.py` | 校验并缓存 TOML 配置；密钥优先读环境变量，再读取 `.env` |
 | `harness/permissions.py` | 规则匹配、风险默认策略、拒绝说明与会话目录授权 |
 | `harness/bash_risk.py` | Bash 启发式检测及保守只读命令识别 |

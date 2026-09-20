@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.9.3.1")
+        self.assertEqual(project["version"], "0.10.1")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], ["rich>=13.0"])
         self.assertEqual(project["readme"], "README.md")
@@ -438,10 +438,10 @@ command_pattern = 'private-test-value['
         self.addCleanup(config._cached_settings.cache_clear)
         error = StringIO()
         with patch.object(config, "PROJECT_FILE", self.path), \
-                patch.object(__main__, "select_model_provider") as select_provider:
+                patch.object(__main__, "create_app", create=True) as create_app:
             with patch("sys.stderr", error):
                 self.assertEqual(__main__.main(), 1)
-        select_provider.assert_not_called()
+        create_app.assert_not_called()
         self.assertIn("tool.harness.permissions.rules", error.getvalue())
         self.assertNotIn("private-test-value", error.getvalue())
 
