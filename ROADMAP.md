@@ -149,6 +149,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.10.1 已发布。远端 `main` 提交为 `be948846405566b41e913aa76008a7916f8e8e74`，注解标签对象为 `50b01daab0c922bb63d565cae5a1453bbd5ff616`，标签 `v0.10.1` 指向该提交；Release「V0.10.1 - Add-连接所有模块」为正式版、非草稿并作为 Latest。
 - 2026-09-20：组装入口完成后全量 620 项离线测试通过，覆盖 `create_app()` 返回唯一可调用入口、默认 provider 与客户端组装、注入客户端跳过密钥加载、`run_cli` 全部生命周期开关，以及 `python -m harness` 使用新入口；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.3.1 已发布。远端 `main` 提交为 `648abb6eb7f67f8a4602fd240b9da65fd4119fd6`，注解标签对象为 `3769040821140279b36f6a0fd964fb40fbfadd2f`，标签 `v0.9.3.1` 指向该提交；Release「V0.9.3.1 - bugfix」为正式版、非草稿并作为 Latest。
 - 2026-09-20：单行发送与多行识别优化完成后全量 617 项离线测试通过，覆盖普通单行一次回车、`\` 显式续行、粘贴后待读输入识别、内部空行保留、readline 行内编辑路径和 prompt 保护；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
