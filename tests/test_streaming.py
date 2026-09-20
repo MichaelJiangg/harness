@@ -82,7 +82,6 @@ class StreamingIntegrationTests(unittest.TestCase):
                 output = session.output.getvalue()
                 self.assertEqual(output.count("DeepSeek >"), 1)
                 self.assertEqual(output.count("第一段中文，随后完成。"), 1)
-                self.assertIn("合计 15 token", output)
                 self.assertEqual(session.errors.getvalue(), "")
             finally:
                 response.release.set()

@@ -38,6 +38,14 @@ class ConfigTests(unittest.TestCase):
         with patch.object(Path, "read_text", return_value="# comment\nOTHER=value\n"):
             self.assertIsNone(config.load_api_key(environ={}))
 
+    def test_tavily_key_uses_same_env_file_rules(self):
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "env-tavily"}, clear=True):
+            with patch.object(Path, "read_text") as read_text:
+                self.assertEqual(config.load_tavily_api_key(), "env-tavily")
+            read_text.assert_not_called()
+        with patch.object(Path, "read_text", return_value='TAVILY_API_KEY="file-tavily"' ):
+            self.assertEqual(config.load_tavily_api_key(environ={}), "file-tavily")
+
     def test_supported_value_syntax_and_custom_file_path(self):
         examples = (
             ("DEEPSEEK_API_KEY=test-value", "test-value"),

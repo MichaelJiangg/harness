@@ -70,7 +70,8 @@ class ProjectConfigTests(unittest.TestCase):
         })
         self.assertEqual(settings["permissions"], {
             "allow": ["read_file", "grep", "delegate", "notes_append"],
-            "ask": ["write_file", "notes_replace"], "deny": [], "rules": [],
+            "ask": ["write_file", "notes_replace", "web_fetch", "web_search"],
+            "deny": [], "rules": [],
         })
 
     def test_initial_rates_and_peak_periods_are_preserved(self):

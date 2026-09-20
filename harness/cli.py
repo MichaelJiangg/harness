@@ -11,7 +11,6 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 
 from .background import BackgroundManager, COMPLETED
@@ -43,6 +42,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 /mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
 /memory [list|show <id>|delete <id> --yes|clear --yes]  查看和管理本地会话记忆
 /notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
+/activity [latest|all|clear]  查看后台工具、请求和编排活动
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -57,7 +57,7 @@ BRIEF_HELP = """直接输入任务开始：
 3. 帮我做 Agent 的发布页产品设计。
 
 核心能力
-文件读写 · 命令执行 · 子任务编排 · 长期记忆
+文件读写 · 命令执行 · 网页读取 · 长期记忆
 
 常用命令
 
@@ -67,7 +67,11 @@ BRIEF_HELP = """直接输入任务开始：
 /cost               查看用量
 /help               完整帮助
 
+输入 /activity 查看后台执行记录
 输入 /exit 退出"""
+
+ACTIVITY_DEFAULT_COUNT = 50
+ACTIVITY_MAX_EVENTS = 500
 
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
@@ -123,6 +127,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     auto_directories = list(security_settings["auto_directories"])
     output_lock = Lock()
     confirmation_lock = Lock()
+    activity_entries = []
+    activity_next_id = 1
     pending_confirmation = None
     worker = None
     turn = 0
@@ -185,6 +191,60 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             else:
                 end_stream_line()
                 print(f"\nDeepSeek > {content}", file=output, flush=True)
+
+    def record_activity(message, kind):
+        nonlocal activity_entries, activity_next_id
+        if not message:
+            return
+        with output_lock:
+            activity_entries.append({
+                "id": str(activity_next_id),
+                "kind": kind,
+                "message": _preview_text(message, multiline=True),
+            })
+            activity_next_id += 1
+            if len(activity_entries) > ACTIVITY_MAX_EVENTS:
+                activity_entries = activity_entries[-ACTIVITY_MAX_EVENTS:]
+
+    def render_activity(entries):
+        if not entries:
+            write("暂无后台活动记录。", style="dim")
+            return
+        if terminal:
+            with output_lock:
+                stop_stream_live()
+                for entry in entries:
+                    console.print(Panel(
+                        Text(entry["message"], style="default", overflow="fold"),
+                        title=f"#{entry['id']} {entry['kind']}",
+                        border_style="dim",
+                        expand=False,
+                        padding=(0, 1),
+                    ))
+        else:
+            write("\n".join(
+                f"[activity #{entry['id']}] {entry['kind']}：{entry['message']}"
+                for entry in entries
+            ))
+
+    def handle_activity_command(text):
+        parts = shlex.split(text)
+        if len(parts) == 1:
+            render_activity(activity_entries[-ACTIVITY_DEFAULT_COUNT:])
+            return
+        if parts[1:] == ["all"]:
+            render_activity(activity_entries)
+            return
+        if parts[1:] == ["clear"]:
+            with output_lock:
+                activity_entries.clear()
+            write("已清空后台活动记录。")
+            return
+        target = parts[1]
+        matches = [entry for entry in activity_entries if entry["id"] == target]
+        render_activity(matches)
+        if not matches:
+            write(f"未找到活动记录 #{target}。", style="yellow")
 
     def start_stream():
         nonlocal response_streamed, stream_buffer, stream_line_open, stream_live
@@ -369,6 +429,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             "write_file": "写入", "bash": "命令执行", "background_submit": "后台任务",
             "swarm": "团队协作", "run_verify": "验证",
             "notes_append": "追加项目笔记", "notes_replace": "替换项目笔记",
+            "web_fetch": "网页读取",
+            "web_search": "网页搜索",
         }.get(name, "工具调用")
         if not terminal:
             write(f"[确认] 非交互模式无法确认{label}，已拒绝本次操作。")
@@ -445,6 +507,19 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                         f"运行方式：{arguments.get('runner', 'node')}\n"
                         f"工作目录：{_preview_text(str(workspace), multiline=False)}\n"
                         f"超时：{arguments.get('timeout', DEFAULT_TIMEOUT)} 秒\n"
+                    )
+                elif name == "web_fetch":
+                    preview = (
+                        f"\n[网页读取确认] {name}\n{risk}\n"
+                        f"目标：{_preview_text(arguments['url'], multiline=False)}\n"
+                        "只读取公开 http/https 网页，禁止私网、重定向和超过 1 MiB 的响应。\n"
+                    )
+                elif name == "web_search":
+                    preview = (
+                        f"\n[网页搜索确认] {name}\n{risk}\n"
+                        f"搜索词：{_preview_text(arguments['query'], multiline=False)}\n"
+                        f"返回条数：{arguments.get('max_results', 5)}\n"
+                        "使用 Tavily 搜索公开网页；需要本地配置 TAVILY_API_KEY。\n"
                     )
                 elif name in {"notes_append", "notes_replace"}:
                     candidate = Path(workspace) / "HARNESS.md"
@@ -531,35 +606,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     tool_executor = build_tool_executor()
 
-    def render_tool(name, arguments, result, prefix):
-        if not terminal:
-            write(f'{prefix}[工具] {name}：{_tool_result_summary(name, result)}')
-            return
-        with output_lock:
-            stop_stream_live()
-            parameters = _preview_text(json.dumps(arguments, ensure_ascii=False, indent=2))
-            summary = _tool_result_summary(name, result)
-            children = []
-            if arguments:
-                children.extend([
-                    Text("参数", style="bold cyan"),
-                    Syntax(parameters, "json", theme="monokai", word_wrap=True, line_numbers=False),
-                ])
-            children.extend([
-                Text("结果", style="bold cyan"),
-                Text(summary, style="default", overflow="fold"),
-            ])
-            border_style = "red" if result.get("status") == "error" else "cyan"
-            console.print(Panel(
-                Group(*children),
-                title=f"{prefix}{name}",
-                border_style=border_style,
-                expand=False,
-                padding=(0, 1),
-            ))
-
     def on_event(event):
-        nonlocal stream_line_open, response_streamed
         if abort.is_set():
             return
         agent = event.get("agent")
@@ -580,10 +627,17 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         )
         if (delegated or background or swarm) and event["type"] in {"text", "response_start"}:
             return
-        if swarm and event["type"] in {
-            "tool", "usage", "compact_start", "compact_done", "compact_skipped", "retry",
-        }:
+        hidden_types = {
+            "tool", "usage", "compact_start", "compact_done", "compact_skipped",
+        }
+        if event["type"] in hidden_types:
+            message = _activity_message(event)
+            if message:
+                record_activity(message, event["type"])
             return
+        message = _activity_message(event)
+        if message:
+            record_activity(message, event["type"])
         if event["type"] == "background_submitted":
             task = event["task"]
             write(
@@ -639,8 +693,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             )
         elif event["type"] == "delegate_failed":
             description = _preview_text(event["description"], multiline=False)
-            message = _preview_text(event["message"], multiline=False)
-            write(f"[delegate] 子任务失败：{description}；{message}", style="red")
+            message_text = _preview_text(event["message"], multiline=False)
+            write(f"[delegate] 子任务失败：{description}；{message_text}", style="red")
         elif event["type"] == "response_start":
             start_stream()
         elif event["type"] == "text":
@@ -651,22 +705,6 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 append_stream(fragment)
                 if terminal and character_delay > 0 and abort.wait(character_delay):
                     return
-        elif event["type"] == "usage":
-            write(prefix + format_usage(event["record"]), style="dim cyan")
-        elif event["type"] == "tool":
-            render_tool(event["name"], event.get("arguments", {}), event["result"], prefix)
-        elif event["type"] == "compact_start":
-            write(
-                f'{prefix}[压缩] 正在总结旧对话（第 {event["attempt"]} 次）。',
-                style="dim",
-            )
-        elif event["type"] == "compact_done":
-            write(
-                f'{prefix}[压缩] 已将上下文从 {event["before"]} 字符缩短至 {event["after"]} 字符。',
-                style="dim",
-            )
-        elif event["type"] == "compact_skipped":
-            write(prefix + "[压缩] 历史较短，无需压缩。", style="dim")
         elif event["type"] == "retry":
             if event["partial"]:
                 write(prefix + "[重试] 上次输出未完成，重新生成。", style="yellow")
@@ -765,6 +803,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 write("上一轮查询进行中，暂时无法管理项目笔记；期间可以输入 /cost。")
             elif text.startswith("/notes"):
                 handle_notes_command(text)
+            elif text.startswith("/activity"):
+                handle_activity_command(text)
             elif text == "/cost":
                 write(format_cost(ledger))
                 if worker and worker.is_alive():
@@ -821,6 +861,45 @@ def _tool_result_summary(name, result):
         if stderr.strip():
             message += f'\nstderr：\n{stderr}'
     return message
+
+
+def _activity_message(event):
+    """把执行过程转成可延迟查看的短消息，不回传正文或密钥。"""
+    kind = event.get("type")
+    if kind == "tool":
+        name = event.get("name", "tool")
+        summary = _tool_result_summary(name, event.get("result", {}))
+        arguments = _preview_text(
+            json.dumps(event.get("arguments", {}), ensure_ascii=False, indent=2)
+        )[:4000]
+        return f"tool:{name}：{summary}\narguments：\n{arguments}"
+    if kind == "usage":
+        record = event.get("record", {})
+        return f"usage：{format_usage(record)}"
+    if kind == "compact_start":
+        return f"compact：正在总结旧对话（第 {event.get('attempt', 1)} 次）。"
+    if kind == "compact_done":
+        return (
+            f"compact：已将上下文从 {event.get('before')} 字符"
+            f"缩短至 {event.get('after')} 字符。"
+        )
+    if kind == "compact_skipped":
+        return "compact：历史较短，无需压缩。"
+    if kind == "retry":
+        message = event.get("message", "")
+        return (
+            f"retry：{message}；{event.get('delay')} 秒后进行"
+            f"第 {event.get('attempt', 1)} 次重试。"
+        )
+    if kind in {"delegate_start", "delegate_complete", "delegate_failed"}:
+        return f"{kind}：{event.get('description', '')}"
+    if kind in {"background_submitted", "background_started", "background_finished"}:
+        task = event.get("task", {})
+        return f"{kind}：任务 #{task.get('task_id')} {task.get('status', '')}"
+    if kind in {"swarm_start", "role_start", "role_complete", "handoff",
+                "swarm_complete", "swarm_failed"}:
+        return f"{kind}：{event.get('description', '') or event.get('from', '') or event.get('to', '')}"
+    return ""
 
 
 def _confirmation_risk(name, arguments):

@@ -103,6 +103,10 @@
 - 记忆默认只在 `python3 -m harness` 入口启用，`run_cli` 嵌入调用保持关闭，避免现有测试和第三方嵌入在退出时产生额外请求。
 - CLI 输出接入 `rich>=13.0`：AI 回复使用 Markdown 面板、代码语法高亮和彩色标题，工具调用面板展示参数与结果摘要，系统、错误、后台、委托和 Swarm 状态使用不同颜色；管道模式继续输出无 ANSI 文本。
 - 启动页文案精简为产品名、模型和一行使用提示，完整说明移入 `/help`。
+- 工具执行、逐请求用量和压缩事件默认进入会话内后台活动日志，`/activity` 可按需查看；委托、后台和 Swarm 保留高层进度，权限确认与错误仍直接显示。
+- 新增 `web_fetch(url)` 只读网页工具，用于用户提供明确 URL 的调研场景；禁止私网、回环、非标准端口、重定向、大响应和非文本内容，不提供搜索。
+- 新增 `web_search(query, max_results)` 接入 Tavily Search API，密钥从 `.env` 的 `TAVILY_API_KEY` 读取；未配置时返回明确错误，密钥不进入日志或 Git。
+- 修复 Swarm 将 `APIError` 和其他运行时异常误报为团队请求额度耗尽的问题；按团队预算、角色预算、API 错误和角色失败分别返回错误码。
 - 新增 `harness/notes.py` 和工作区根目录 `HARNESS.md`：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换长期项目知识；固定单文件、最多 65536 字节，拒绝软链接、目录和二进制内容。
 - CLI 新增 `/notes`、`/notes append <text>`、`/notes replace --yes <text>` 和 `/notes clear --yes`；追加默认放行，整篇替换默认询问，`deny` 始终优先。项目笔记默认只在 CLI 启动入口启用。
 
@@ -123,6 +127,10 @@
 
 ## 最近验证
 
+- 2026-09-20：Swarm 错误分类修复后全量 558 项离线测试通过，新增 APIError 与普通 RuntimeError 不会误报为 `swarm_request_limit` 的回归。
+- 2026-09-20：接入 Tavily `web_search` 后全量 557 项离线测试通过，覆盖请求构造、密钥脱敏、缺失密钥、HTTP 错误、无效响应、结果清洗和默认确认。
+- 2026-09-20：新增 `web_fetch` 后全量 552 项离线测试通过，覆盖公开 HTML 提取、私网与危险 URL 拒绝、状态码、内容类型、大小限制和默认确认。
+- 2026-09-20：后台活动日志重构后全量 548 项离线测试通过；新增 `/activity` 查看工具参数、结果、用量、压缩和编排事件，`compileall` 与 `git diff --check` 通过。
 - 2026-09-20：V0.6.2 已发布。远端 `main` 提交为 `1014d76d0ea805612177e8b2d9f982fda33e940e`，注解标签对象为 `3c6d135538c15b257b8f4aaf2fec904968e9d8a3`，标签 `v0.6.2` 指向该提交；Release「V0.6.2 - 优化启动页」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：启动页文案精简后全量 548 项离线测试通过；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。
 - 2026-09-20：V0.6.1 已发布。远端 `main` 提交为 `ad96b41f6e34916d6ddc3017314ec4938ec5d35b`，注解标签对象为 `b7fcd38dec55e4adb3f7347f71a86214376b148e`，标签 `v0.6.1` 指向该提交；Release「V0.6.1 - 美化样式」为正式版、非草稿并作为 Latest。远端发布树与本地 88 个 blob 的路径、mode 和 SHA 逐项一致。

@@ -5,11 +5,11 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from harness.cli import run_cli
 from harness.engine import QueryState, query_loop
 from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
 from test_engine import FakeClient, reply, tool_call
+from test_cli import CLISession
 
 
 def grep_call(identifier, **arguments):
@@ -92,13 +92,18 @@ class GrepIntegrationTests(unittest.TestCase):
             reply(None, [grep_call("pipe-search", keyword="needle", glob="*.py")]),
             reply("sample.py 第 1 行包含 needle。"),
         ]))
-        output, errors = StringIO(), StringIO()
         with patch("harness.tools.executor.Path.cwd", return_value=self.workspace):
-            run_cli(client, input_stream=StringIO("搜索 needle\n"), output=output, error_output=errors)
-        self.assertIn("[工具] grep：返回 1 条匹配。", output.getvalue())
-        self.assertIn("DeepSeek > sample.py 第 1 行包含 needle。", output.getvalue())
-        self.assertNotIn("[确认]", output.getvalue())
-        self.assertEqual(errors.getvalue(), "")
+            session = CLISession(client, lines=("搜索 needle\n",))
+            try:
+                self.assertTrue(session.output.wait_for("DeepSeek > sample.py 第 1 行包含 needle。"))
+                session.input.send("/activity\n")
+                self.assertTrue(session.output.wait_for("grep：返回 1 条匹配。"))
+                session.close()
+                output = session.output.getvalue()
+                self.assertNotIn("[确认]", output)
+                self.assertEqual(session.errors.getvalue(), "")
+            finally:
+                session.close()
 
 
 if __name__ == "__main__":

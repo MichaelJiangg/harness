@@ -65,7 +65,6 @@ class PermissionCLITests(unittest.TestCase):
         session.input.send("/cost\n")
         self.assertTrue(session.output.wait_for("模型请求：1 次。"))
         session.input.send("y\n")
-        self.assertTrue(session.output.wait_for("[请求 #2"))
         # 第二轮已经返回 usage，随后会重新进入同一确认通道。
         with session.output.changed:
             self.assertTrue(session.output.changed.wait_for(

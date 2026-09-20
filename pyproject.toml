@@ -76,6 +76,6 @@ output_per_million = 1.2
 
 [tool.harness.permissions]
 allow = ["read_file", "grep", "delegate", "notes_append"]
-ask = ["write_file", "notes_replace"]
+ask = ["write_file", "notes_replace", "web_fetch", "web_search"]
 deny = []
 rules = []

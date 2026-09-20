@@ -204,7 +204,6 @@ class CLITests(unittest.TestCase):
             release.set()
             session.join()
             self.assertIn("DeepSeek > 回答完成。", session.output.getvalue())
-            self.assertIn("合计 15 token", session.output.getvalue())
             client.complete.assert_called_once()
             self.assertEqual(session.errors.getvalue(), "")
         finally:
@@ -234,12 +233,14 @@ class CLITests(unittest.TestCase):
             self.assertTrue(session.output.wait_for("DeepSeek > 文件已经读取。"))
             session.input.send("/cost\n")
             self.assertTrue(session.output.wait_for("模型请求：2 次。"))
+            session.input.send("/activity\n")
+            self.assertTrue(session.output.wait_for("[activity"))
             session.close()
             self.assertEqual(client.complete.call_count, 2)
             self.assertEqual(ledger.summary()["total_tokens"], 38)
             self.assertEqual([record["turn"] for record in ledger.records], [1, 1])
             output = session.output.getvalue()
-            self.assertIn(f"[工具] read_file：已读取文件（{len(content)} 字符）。", output)
+            self.assertIn(f"read_file：已读取文件（{len(content)} 字符）。", output)
             self.assertNotIn(content, output)
             import json
             message = next(item for item in client.complete.call_args_list[1].kwargs["messages"]
@@ -296,11 +297,14 @@ class CLITests(unittest.TestCase):
                     self.assertTrue(session.output.wait_for(BRIEF_HELP))
                     cwd.return_value = Path(later)
                     session.input.send("读取文件\n")
+                    self.assertTrue(session.output.wait_for("DeepSeek > 读取结束。"))
+                    session.input.send("/activity\n")
+                    self.assertTrue(session.output.wait_for("[activity"))
                     session.close()
                     message = next(item for item in client.complete.call_args_list[1].kwargs["messages"]
                                    if item["role"] == "tool")
                     self.assertEqual(json.loads(message["content"])["content"], "启动目录的文件。")
-                    self.assertIn("[工具] read_file：已读取文件", session.output.getvalue())
+                    self.assertIn("read_file：已读取文件", session.output.getvalue())
                     self.assertEqual(session.errors.getvalue(), "")
                 finally:
                     session.close()
@@ -340,7 +344,7 @@ class CLITests(unittest.TestCase):
     def test_manual_compaction_without_old_history_does_not_call_model(self):
         client = Mock()
         output = StringIO()
-        run_cli(client, input_stream=StringIO("/compact\n"), output=output)
+        run_cli(client, input_stream=StringIO("/compact\n/activity\n"), output=output)
         client.complete.assert_not_called()
         self.assertIn("历史较短，无需压缩", output.getvalue())
         self.assertIn("/compact", HELP)
@@ -370,6 +374,8 @@ class CLITests(unittest.TestCase):
                 self.assertTrue(session.output.wait_for("DeepSeek > 第 1 次回答"))
                 self.finish_worker(workers)
                 session.input.send("/compact\n")
+                self.finish_worker(workers)
+                session.input.send("/activity\n")
                 self.assertTrue(session.output.wait_for("从 200 字符缩短至 20 字符"))
                 self.finish_worker(workers)
                 session.input.send("新问题\n")

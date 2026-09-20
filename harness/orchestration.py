@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 
+from .client import APIError
+
 
 _CURRENT_QUERY = ContextVar("harness_current_query", default=None)
 
@@ -237,14 +239,25 @@ def run_swarm(*, parent, description, task, roles, max_rounds, make_executor):
         except ContextTooLong:
             return _swarm_failure("swarm_context_too_long",
                                   f"{current.name} 上下文过长，无法继续团队协作。")
-        except RuntimeError:
+        except RuntimeError as error:
+            if budget.request_count >= budget.max_requests:
+                return _swarm_failure(
+                    "swarm_request_limit", "团队请求额度耗尽，协作未完成。"
+                )
             if child.request_count >= child.max_requests:
                 return _swarm_failure(
                     "swarm_role_request_limit",
                     f"{current.name} 达到单角色 {child.max_requests} 次请求上限。",
                 )
-            return _swarm_failure("swarm_request_limit",
-                                  "团队请求额度耗尽，协作未完成。")
+            if isinstance(error, APIError):
+                return _swarm_failure(
+                    "swarm_role_api_error",
+                    f"{current.name} 的模型请求失败，协作未完成；请稍后重试或缩小任务。",
+                )
+            return _swarm_failure(
+                "swarm_role_failed",
+                f"{current.name} 执行失败，未完成交接。",
+            )
         except Exception:
             return _swarm_failure("swarm_role_failed", f"{current.name} 未能完成任务。")
 

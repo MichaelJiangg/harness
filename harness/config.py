@@ -194,9 +194,17 @@ def get_settings():
 
 
 def load_api_key(*, env_file=None, environ=None):
+    return load_env_key("DEEPSEEK_API_KEY", env_file=env_file, environ=environ)
+
+
+def load_tavily_api_key(*, env_file=None, environ=None):
+    return load_env_key("TAVILY_API_KEY", env_file=env_file, environ=environ)
+
+
+def load_env_key(key_name, *, env_file=None, environ=None):
     environ = os.environ if environ is None else environ
-    if "DEEPSEEK_API_KEY" in environ:
-        return environ["DEEPSEEK_API_KEY"]
+    if key_name in environ:
+        return environ[key_name]
 
     path = ENV_FILE if env_file is None else Path(env_file)
     try:
@@ -206,19 +214,19 @@ def load_api_key(*, env_file=None, environ=None):
     except (OSError, UnicodeError):
         raise ValueError("无法读取项目 .env，请检查文件权限和 UTF-8 编码。") from None
 
-    api_key = None
+    secret = None
     for number, line in enumerate(content.splitlines(), start=1):
         line = line.strip()
         if line.startswith("export "):
             line = line[7:].lstrip()
         name, separator, raw_value = line.partition("=")
-        if name.strip() != "DEEPSEEK_API_KEY":
+        if name.strip() != key_name:
             continue
         try:
             parts = shlex.split(raw_value, comments=True, posix=True)
             if not separator or len(parts) > 1:
                 raise ValueError
         except ValueError:
-            raise ValueError(f".env 第 {number} 行的 DEEPSEEK_API_KEY 格式无效，请检查引号与赋值格式。") from None
-        api_key = parts[0] if parts else ""
-    return api_key
+            raise ValueError(f".env 第 {number} 行的 {key_name} 格式无效，请检查引号与赋值格式。") from None
+        secret = parts[0] if parts else ""
+    return secret

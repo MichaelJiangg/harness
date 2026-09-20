@@ -17,6 +17,7 @@ cd harness
 
 ```dotenv
 DEEPSEEK_API_KEY=你的DeepSeek密钥
+TAVILY_API_KEY=你的Tavily密钥
 ```
 
 之后每次在项目目录直接运行：
@@ -47,6 +48,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `/mode ask|auto [目录]` | 切换权限模式；auto 模式信任当前或指定工作目录 |
 | `/memory [list\|show <id>\|delete <id> --yes\|clear --yes]` | 查看和管理本地会话记忆 |
 | `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
+| `/activity [latest\|all\|clear]` | 查看后台工具、请求、压缩和编排活动 |
 | `/help` | 查看帮助 |
 | `/exit` | 退出，停止后续模型和工具调用 |
 
@@ -96,6 +98,18 @@ HARNESS.md：
 
 Harness 默认强制启用交互终端颜色；管道输出不会混入终端控制序列。
 
+工具执行、逐请求用量和上下文压缩事件默认进入会话内后台活动日志，不打断对话；输入 `/activity` 可展开查看工具参数、结果摘要、用量、压缩、重试和编排事件。权限确认和错误仍直接显示。
+
+`web_fetch(url)` 可以读取用户明确提供的公开网页，但不提供搜索。URL 仅限 80/443 端口，禁止本机、私网、链路本地、重定向和超过 1 MiB 的响应，网页脚本不会执行；默认需要确认。
+
+`web_search(query, max_results=5)` 通过 Tavily Search API 搜索公开网页。API key 放在项目根目录 `.env`：
+
+```dotenv
+TAVILY_API_KEY=你的Tavily密钥
+```
+
+`.env*` 已被 `.gitignore` 排除；代码、工具参数、权限日志和 GitHub 发布清单不会包含该密钥。
+
 ## 项目配置
 
 项目根目录的 `pyproject.toml` 集中管理元信息及非密钥默认配置。启动时通过 Python 标准库 `tomllib` 读取、验证并保存快照，修改配置后重启生效。配置文件位置固定在 Harness 源码根目录，不会从所操作的其他目录加载同名文件；当前仍使用 `python3 -m harness` 从源码运行。
@@ -135,7 +149,7 @@ API key 继续放在 `.env` 或环境变量中，不能迁入 `pyproject.toml`�
 ```toml
 [tool.harness.permissions]
 allow = ["read_file", "grep", "delegate", "notes_append"]
-ask = ["write_file", "notes_replace"]
+ask = ["write_file", "notes_replace", "web_fetch", "web_search"]
 deny = []
 rules = []
 ```
@@ -500,6 +514,8 @@ V0.5 提供三种编排方式：
 | `harness/tools/notes_read.py` | 读取 HARNESS.md 项目长期笔记 |
 | `harness/tools/notes_append.py` | 向 HARNESS.md 追加长期知识 |
 | `harness/tools/notes_replace.py` | 替换 HARNESS.md 全部内容 |
+| `harness/tools/web_fetch.py` | 读取公开网页并提取文本，拒绝私网、重定向和危险内容 |
+| `harness/tools/web_search.py` | 使用 Tavily 搜索公开网页并返回标题、URL 和摘要 |
 | `harness/usage.py` | 逐请求 token 记录、模型费率与费用汇总 |
 | `harness/cli.py` | 终端输入、回答和斜杠命令 |
 | `tests/` | 模拟接口、工具、计费与 CLI 测试 |

@@ -45,6 +45,9 @@
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
 - CLI 交互终端输出统一由 `rich` 负责：AI 回答使用 Markdown 面板和代码语法高亮，工具调用展示参数与结构摘要，系统、错误、后台、委托和 Swarm 状态分层配色；管道输出保持无 ANSI 的纯文本。工具事件可携带脱敏参数供终端显示，但不能向模型或日志放宽权限。
+- 工具执行、逐请求用量和压缩事件默认只进入会话内活动日志，不直接打印；`/activity` 可按需展开。委托、后台和 Swarm 保留高层进度，权限确认、错误和 AI 回答保持可见。
+- `harness/tools/web_fetch.py` 提供只读公开网页读取，不接受搜索或用户提供的认证信息；拒绝私网、回环、链路本地、非标准端口、重定向、大响应和非文本内容，默认逐次确认。
+- `harness/tools/web_search.py` 通过 Tavily 搜索公开网页；`TAVILY_API_KEY` 仅从环境变量或项目 `.env` 读取，密钥不进入请求日志、权限日志或版本控制，缺失时返回配置错误。
 - 启动界面只显示产品名、模型和一行使用提示，详细权限、工具与命令说明由 `/help` 提供，避免每次启动重复输出长文档。
 - `tests/`：使用 `unittest` 验证行为，默认不访问真实 DeepSeek API。
 - `README.md`：启动方法、配置、行为和限制。

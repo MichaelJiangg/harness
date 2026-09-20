@@ -2,6 +2,7 @@ import json
 from threading import Event
 import unittest
 
+from harness.client import APIError
 from harness.engine import QueryState
 from harness.orchestration import Handoff, SwarmRole, _parse_handoff, run_swarm
 from harness.usage import UsageLedger
@@ -105,6 +106,19 @@ class SwarmOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["code"], "swarm_max_rounds")
         self.assertEqual(state.client.requests[-1]["messages"][1]["content"],
                          "团队任务：实现缓存模块\n你当前的角色：Reviewer\n交接来自：Coder\n交接摘要：第一版")
+
+    def test_api_and_runtime_errors_are_not_reported_as_team_budget(self):
+        for error, expected in (
+            (APIError("DeepSeek 请求失败"), "swarm_role_api_error"),
+            (RuntimeError("角色内部失败"), "swarm_role_failed"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                _, result, _ = self.run_case(
+                    [error],
+                    [role("Coder", "coder", handoff_to=[])],
+                )
+                self.assertEqual(result["code"], expected)
+                self.assertNotEqual(result["code"], "swarm_request_limit")
 
     def test_invalid_handoff_is_reported_without_leaking_model_text(self):
         state, result, _ = self.run_case(

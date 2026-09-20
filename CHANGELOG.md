@@ -1,5 +1,15 @@
 # 版本记录
 
+## 未发布
+
+- 工具执行、逐请求用量和上下文压缩事件默认移入后台活动日志，不再逐条打印到对话。
+- 新增 `/activity [latest|all|clear]`，按需查看工具参数、结果摘要、请求用量、压缩、重试和编排事件。
+- 委托、后台任务和 Swarm 保留高层进度显示；权限确认和错误仍直接显示。
+- 新增受控 `web_fetch(url)` 工具：只读取公开 http/https URL，提取 HTML、纯文本、JSON 或 XML 正文，拒绝私网、回环、链路本地、非标准端口、重定向、敏感内容和超过 1 MiB 的响应；默认需要用户确认。
+- `web_fetch` 不提供搜索，未知产品仍应先向用户索取官方 URL。
+- 新增 `web_search(query, max_results=5)`：接入 Tavily Search API，返回标题、URL、摘要、相关度和发布时间；API key 从本地 `.env` 的 `TAVILY_API_KEY` 读取，默认需要用户确认，密钥不进入代码、日志或 GitHub。
+- 修复 Swarm 错误分类：只有团队或单角色计数器真正达到上限才返回请求额度错误，`APIError` 和其他运行时异常分别返回 `swarm_role_api_error`、`swarm_role_failed`，不再误报为“团队请求额度耗尽”。
+
 ## V0.6.2 — 优化启动页
 
 Git 标签：`v0.6.2`。

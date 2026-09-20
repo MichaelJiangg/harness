@@ -49,12 +49,16 @@ class ToolRegistryTests(unittest.TestCase):
         notes_append_tool, _ = REGISTRY.get("notes_append")
         notes_read_tool, _ = REGISTRY.get("notes_read")
         notes_replace_tool, _ = REGISTRY.get("notes_replace")
+        web_fetch_tool, _ = REGISTRY.get("web_fetch")
+        web_search_tool, _ = REGISTRY.get("web_search")
         self.assertEqual(descriptions, [
             background_check_tool.to_deepseek(), background_submit_tool.to_deepseek(),
             bash_tool.to_deepseek(), delegate_tool.to_deepseek(), search_tool.to_deepseek(),
             notes_append_tool.to_deepseek(), notes_read_tool.to_deepseek(),
             notes_replace_tool.to_deepseek(), tool.to_deepseek(),
-            run_verify_tool.to_deepseek(), swarm_tool.to_deepseek(), write_tool.to_deepseek(),
+            run_verify_tool.to_deepseek(), swarm_tool.to_deepseek(),
+            web_fetch_tool.to_deepseek(), web_search_tool.to_deepseek(),
+            write_tool.to_deepseek(),
         ])
         self.assertNotIn("requires_confirmation", json.dumps(descriptions))
         self.assertNotIn("supports_cancellation", json.dumps(descriptions))

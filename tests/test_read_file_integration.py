@@ -34,7 +34,8 @@ class ReadFileIntegrationTests(unittest.TestCase):
             self.assertEqual([item["function"]["name"] for item in definitions],
                              ["background_check", "background_submit", "bash", "delegate",
                               "grep", "notes_append", "notes_read", "notes_replace",
-                              "read_file", "run_verify", "swarm", "write_file"])
+                              "read_file", "run_verify", "swarm", "web_fetch",
+                              "web_search", "write_file"])
             definition = next(item for item in definitions if item["function"]["name"] == "read_file")
             self.assertEqual(definition["type"], "function")
             function = definition["function"]

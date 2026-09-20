@@ -36,7 +36,8 @@ class ToolTests(unittest.TestCase):
         self.assertEqual([tool["function"]["name"] for tool in definitions],
                          ["background_check", "background_submit", "bash", "delegate",
                           "grep", "notes_append", "notes_read", "notes_replace",
-                          "read_file", "run_verify", "swarm", "write_file"])
+                          "read_file", "run_verify", "swarm", "web_fetch",
+                          "web_search", "write_file"])
         definition = next(tool for tool in definitions if tool["function"]["name"] == "read_file")
         self.assertEqual(definition["type"], "function")
         self.assertTrue(definition["function"]["description"])
