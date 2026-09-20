@@ -144,7 +144,8 @@
 
 ## 最近验证
 
-- 2026-09-20：进度反馈和异步 MCP 启动完成后全量 591 项离线测试通过，覆盖等待动画、逐字输出顺序、主查询工具参数与耗时显示、管道模式不受限速、`tool_start` 与 `tool` 事件顺序、延迟 MCP 连接、首个提问等待与工具刷新；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。启动退出实测由约 2.7 秒降至约 0.23 秒。未提交、推送或发布。
+- 2026-09-20：V0.9.1 已发布。远端 `main` 提交为 `772f65a6b783b5e89e6360e30fdd6700cfaf6613`，注解标签对象为 `828382f50105c7508ef3b6b1d1f577f86a21aa06`，标签 `v0.9.1` 指向该提交；Release「V0.9.1 - Add-进度反馈、速度提升」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。
+- 2026-09-20：进度反馈和异步 MCP 启动完成后全量 591 项离线测试通过，覆盖等待动画、逐字输出顺序、主查询工具参数与耗时显示、管道模式不受限速、`tool_start` 与 `tool` 事件顺序、延迟 MCP 连接、首个提问等待与工具刷新；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。启动退出实测由约 2.7 秒降至约 0.23 秒。
 - 2026-09-20：V0.8 已发布。远端 `main` 提交为 `c804bbe822a38903c063e98063bfc862528febb4`，注解标签对象为 `4bfbb94748b3123e1ffaa5be68c654a7b0bc5ba9`，标签 `v0.8` 指向该提交；Release「V0.8 - Add-MCP」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：统一 MCP 配置与自动重连完成后全量 587 项离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、进程退出重连、外部 Schema、DeepSeek 工具名归一化、CLI 合并转发和环境密钥引用；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。另用项目 `.env` 和本地 `.harness/mcp.json` 完成 `tavily-mcp@0.2.22` 真实 stdio 握手并发现 5 个工具；带全部外部工具的 DeepSeek 请求由 HTTP 400 修复为 200，Harness 实际对话返回正常。未发起 Tavily 计费搜索。
 - 2026-09-20：V0.7.2 已发布。远端 `main` 提交为 `a3d3f96a99b949e0031856f09a2a2a2cf0dfadd3`，注解标签对象为 `9229edcad8879a38f4c7866ccfa82e94c682f443`，标签 `v0.7.2` 指向该提交；Release「V0.7.2 - Add-Hooks And Skill」为正式版、非草稿并作为 Latest。远端发布树与本地 100 个 blob 的路径、mode 和 SHA 逐项一致。
