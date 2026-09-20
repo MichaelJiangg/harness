@@ -125,7 +125,7 @@
 
 ## 进行中
 
-- MCP 集成已完成实现和离线验证，等待版本编号及发布确认。
+- 暂无进行中的开发事项。
 
 ## 待办
 
@@ -141,7 +141,8 @@
 
 ## 最近验证
 
-- 2026-09-20：统一 MCP 配置与自动重连完成后全量 587 项离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、进程退出重连、外部 Schema、DeepSeek 工具名归一化、CLI 合并转发和环境密钥引用；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。另用项目 `.env` 和本地 `.harness/mcp.json` 完成 `tavily-mcp@0.2.22` 真实 stdio 握手并发现 5 个工具；带全部外部工具的 DeepSeek 请求由 HTTP 400 修复为 200，Harness 实际对话返回正常。未发起 Tavily 计费搜索，未提交、推送或发布。
+- 2026-09-20：V0.8 已发布。远端 `main` 提交为 `c804bbe822a38903c063e98063bfc862528febb4`，注解标签对象为 `4bfbb94748b3123e1ffaa5be68c654a7b0bc5ba9`，标签 `v0.8` 指向该提交；Release「V0.8 - Add-MCP」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。
+- 2026-09-20：统一 MCP 配置与自动重连完成后全量 587 项离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、进程退出重连、外部 Schema、DeepSeek 工具名归一化、CLI 合并转发和环境密钥引用；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。另用项目 `.env` 和本地 `.harness/mcp.json` 完成 `tavily-mcp@0.2.22` 真实 stdio 握手并发现 5 个工具；带全部外部工具的 DeepSeek 请求由 HTTP 400 修复为 200，Harness 实际对话返回正常。未发起 Tavily 计费搜索。
 - 2026-09-20：V0.7.2 已发布。远端 `main` 提交为 `a3d3f96a99b949e0031856f09a2a2a2cf0dfadd3`，注解标签对象为 `9229edcad8879a38f4c7866ccfa82e94c682f443`，标签 `v0.7.2` 指向该提交；Release「V0.7.2 - Add-Hooks And Skill」为正式版、非草稿并作为 Latest。远端发布树与本地 100 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：预置钩子完成后全量 576 项离线测试通过，覆盖配置开关、ruff/black 选择、无格式化器降级和会话记忆提示。
 - 2026-09-20：Skills 完成后全量 574 项离线测试通过，覆盖技能加载、列表、激活、工具限制、提示词注入和 `.skill` 后缀。
