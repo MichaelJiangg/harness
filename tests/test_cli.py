@@ -94,7 +94,8 @@ class ObservableOutput(StringIO):
 
 
 class CLISession:
-    def __init__(self, client, *, ledger=None, lines=(), terminal=False, character_delay=0.02):
+    def __init__(self, client, *, ledger=None, lines=(), terminal=False,
+                 character_delay=0.02, run_cli_kwargs=None):
         self.input = QueuedInput(*lines)
         self.output = ObservableOutput(strip_ansi=terminal)
         self.input.isatty = lambda: terminal
@@ -102,6 +103,7 @@ class CLISession:
         self.errors = StringIO()
         self.failures = []
         self.finished = Event()
+        run_cli_kwargs = run_cli_kwargs or {}
 
         def run():
             try:
@@ -109,6 +111,7 @@ class CLISession:
                     client, ledger=ledger, input_stream=self.input,
                     output=self.output, error_output=self.errors,
                     character_delay=character_delay,
+                    **run_cli_kwargs,
                 )
             except BaseException as error:
                 self.failures.append(error)

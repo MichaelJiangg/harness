@@ -20,7 +20,7 @@
 - `harness/audit.py` 负责 `.harness/permission.log` 的 JSONL 审计，记录 UTC 时间、会话／调用标识、工具、脱敏参数、风险、匹配规则、决策和确认状态；正文、搜索关键词和原始命令一律不记录，仅保留路径和必要长度／指纹。权限与确认结果须在工具副作用前落盘，日志错误拒绝执行。日志目录和文件拒绝软链接／特殊文件，私有权限创建，`.harness/` 排除 Git；测试日志仅写临时工作区。
 - `.harness` 属于内部运行目录，读写与搜索工具按既有敏感路径机制拒绝访问，防止修改日志或将日志混入搜索结果；用户可在终端自行查看。可选规则 `name` 用于拒绝说明与审计，未提供时使用 TOML 声明位置 `rules[index]`，名称必须唯一且可显示。
 - `harness/`：命令行入口、DeepSeek 客户端、查询循环、工具注册与分发、用量统计。
-- `harness/tools/`：统一容纳三层工具系统。`definition.py` 定义工具名称、说明、参数及内部 `supports_cancellation` 标志（默认 `False`），并转换为 DeepSeek 格式；`registry.py` 自动发现工具模块、注册和按名称查找；`executor.py` 校验参数、检查统一权限、要求必要的本地确认、分发执行并统一结果与错误；`__init__.py` 初始化并导出公共接口。内部能力不作为模型可填写的参数。
+- `harness/tools/`：统一容纳三层工具系统。`definition.py` 定义工具名称、说明、参数、内部 `supports_cancellation` 与 `validate_arguments` 标志（默认分别为 `False`、`True`），并转换为 DeepSeek 格式；`registry.py` 自动发现工具模块、注册和按名称查找；`executor.py` 校验参数、检查统一权限、要求必要的本地确认、分发执行并统一结果与错误；`__init__.py` 初始化并导出公共接口。内部能力不作为模型可填写的参数。
 - 具体工具独立成文件，如 `harness/tools/read_file.py`，提供 `DEFINITION` 与 `execute(arguments, workspace)`。启动时自动发现该目录直属模块，跳过基础模块和下划线开头的辅助模块；重复名称、缺失定义或不可调用的实现必须明确报错。新增工具无需改注册列表或查询循环。
 - 声明 `supports_cancellation=True` 的长运行工具额外接受关键字参数 `abort=None`，执行层传入会话取消事件；现有读写工具保持两参数接口。工具返回失败状态时执行层不得覆盖为成功，已启动的命令失败仍记为 `executed=True`。
 - 核心入口为 `harness/engine.py` 的 `query_loop(state)`，保持「请求模型、识别工具调用、执行、回传、继续」的骨架清晰。
@@ -46,6 +46,11 @@
 - `harness/hooks.py` 从 `.harness/hooks.json` 加载生命周期 Hooks，事件包括会话开始／结束、发送消息前后和工具执行前后；支持 shell、prompt、python，工具事件对主查询和子 Agent 统一生效。
 - `harness/skills.py` 从 `.harness/skills/*.json` 加载技能包，`/skill` 查看、激活和停用；激活后只向当前查询开放技能声明的工具，并注入技能提示词。
 - `harness/presets.py` 提供默认启用的项目约定、写后格式化和会话记忆预置钩子；开关位于 `tool.harness.presets`，格式化优先使用 ruff/black 和本地 prettier。
+- `harness/mcp.py` 统一加载 `.harness/mcp.json`，文件存在时优先于 `pyproject.toml` 回退列表；JSON 按服务器名称声明 `command`、`args` 和 `env`，最多 50 台，格式错误停止启动。通过 stdio 使用 JSON-RPC 2.0 完成 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`，把工具注册为符合 DeepSeek 名称规则的 `mcp_<server>_<tool>` 并合并进当前查询。单个服务器最多 200 个工具，请求默认超时 120 秒；启动或列表失败只跳过该服务器，退出时关闭全部子进程。
+- MCP 管理器维护每台服务器的连接状态、工具数量、运行时间、错误和重试次数；每台服务器有独立后台监控线程，异常退出后自动指数退避重连并重新发现工具。`/mcp` 查看状态，不调用模型。重连成功会在空闲时刷新当前执行器和模型工具列表。
+- MCP 子进程默认不继承 DeepSeek/Tavily 密钥和动态加载器环境；配置 `env` 的 `${VARIABLE}` 引用从进程环境或项目 `.env` 解析，缺失或为空时不启动该服务器。外部工具默认中风险询问并可用完整工具名配置 `allow`／`ask`／`deny`，但服务器不受文件工具工作区限制。
+- 无本地 JSON 配置时的默认 MCP 服务器为 `tavily`，使用 `npx -y tavily-mcp@0.2.22` 并通过 `${TAVILY_API_KEY}` 注入 `.env` 密钥；真实密钥不得写入 `.harness/mcp.json`、`pyproject.toml`、日志或 Git。
+- `harness/tools/executor.py` 的 `create_tool_executor` 接受可选 `extra_tools` 扩展列表，用于在不绕过默认注册表快照和权限守卫的情况下追加 MCP 工具；外部工具保留服务器声明的 JSON Schema 供模型参考，同时关闭本地 JSON Schema 子集校验，参数错误由 MCP 服务器回传。
 - 记忆默认只在 `python3 -m harness` 的 CLI 启动入口启用，`run_cli` 嵌入调用默认保持关闭，避免测试或第三方嵌入在退出时产生意外的模型请求。
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。
@@ -70,7 +75,7 @@
 - 启动时优先读取 `DEEPSEEK_API_KEY` 环境变量，未设置时从项目根目录 `.env` 读取同名键；仅使用标准库，不执行文件内容，不输出密钥或请求认证信息。
 - `.env` 由 `.gitignore` 排除；创建或修改实际 `.env` 文件前仍须用户明确确认。只准备空值模板，真实密钥由用户在本地填写。
 - 工具调用必须保留 assistant 消息，并用对应 `tool_call_id` 回传结果。
-- 工具定义使用 `name`、`description`、`input_schema`；发送给 DeepSeek 时转换为 `type: function` 与 `function.parameters`。执行层集中处理本阶段使用的对象、字符串、整数类型，以及必填、额外字段、字符串最短长度和整数上下界校验，不引入第三方依赖。
+- 工具定义使用 `name`、`description`、`input_schema`；发送给 DeepSeek 时转换为 `type: function` 与 `function.parameters`。执行层集中处理本阶段使用的对象、字符串、整数类型，以及必填、额外字段、字符串最短长度和整数上下界校验，不引入第三方依赖。MCP 外部定义可关闭该本地校验，但不得放宽权限、确认、审计或结果预算。
 - `read_file` 必填非空字符串 `path`，可选整数 `offset`（行号从 0 开始，默认 0）、`column`（起始行内字符位置，从 0 开始，默认 0）与 `limit`（必须为正，默认每页最多 200 行）。读取 UTF-8 普通文件，保留原始换行；整文件仍受 1 MiB 上限约束。每页完整 JSON 连同执行层字段不超过当前查询的工具结果预算，返回原始位置、`next_offset`、`next_column`、`eof` 和总行数。普通页优先按整行切分，超长单行按字符续读，不使用首尾截断丢掉中间内容；空文件和超过末尾返回空内容及完成标记，非法行内位置明确报错。
 - 完整文件分析由 AI 在现有查询循环中按返回游标连续调用 `read_file`，直到 `eof`；只需要指定行段时不得强制读完整文件。每一页仍经过相同参数校验、权限、审计和取消检查，不在工具内部隐藏执行整文件／模型循环。引擎仅缓存每个文件的最新分页位置，旧正文摘要后可按行号重新读取；资源耗尽时反馈未读完文件的下一页位置，不声称全文分析已完成。
 - 文件读写工具的相对路径基于会话启动目录，绝对路径必须在同一目录内。解析软链接后再次检查范围，拒绝 `.env*`、`.git` 及越界路径；路径语义、文件类型和文件操作异常由具体工具处理。

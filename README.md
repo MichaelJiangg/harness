@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.7.2 — Add-Hooks And Skill**（Git 标签 `v0.7.2`）。在 Hooks 基础上增加技能包和预置钩子。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.8 — Add-MCP**（Git 标签 `v0.8`）。增加统一 MCP 配置、状态查询和自动重连。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -51,6 +51,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `/skill [list\|off\|<技能名>]` | 查看、激活和停用技能包 |
 | `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
 | `/activity [latest\|all\|clear]` | 查看后台工具、请求、压缩和编排活动 |
+| `/mcp` | 查看外部 MCP 服务器连接状态和工具数量 |
 | `/help` | 查看帮助 |
 | `/exit` | 退出，停止后续模型和工具调用 |
 
@@ -199,6 +200,65 @@ session_memory = true
 - `auto_format`：写入 Python 文件后优先运行 `ruff format`，其次 `black`；前端文件在项目存在本地 prettier 时运行 prettier。
 - `session_memory`：退出时保存本次会话摘要。
 
+## MCP 集成
+
+Harness 可以通过标准输入输出连接外部 Model Context Protocol 工具服务器。项目级服务器统一放在工作区 `.harness/mcp.json`：
+
+```json
+{
+  "servers": {
+    "tavily": {
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@0.2.22"],
+      "env": {
+        "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-filesystem", "."],
+      "env": {}
+    }
+  }
+}
+```
+
+`.harness/mcp.json` 存在时优先于 `pyproject.toml` 的 `tool.harness.mcp.servers`；`pyproject.toml` 继续作为没有本地 JSON 配置时的回退。`.harness/` 已被 Git 排除，因此数据库地址、本机路径和不同项目的服务器配置不会进入仓库。
+
+启动时会读取配置、依次连接服务器、发送 `initialize` 和 `tools/list`，把发现的外部工具注册为 `mcp_<server>_<tool>`。冒号等 DeepSeek 工具名不接受的字符会替换为下划线；模型可以像调用 `read_file` 一样直接使用这些工具，每次调用都会按原始工具名和参数转发给对应服务器。
+
+每台服务器会在独立后台监控线程中维持连接。进程异常退出后会自动指数退避重连，默认首次间隔 1 秒、最大 30 秒；重连成功后重新发现工具并刷新当前查询的工具列表。工具调用发生在断线瞬间时会返回错误，下一次调用或下一次提问在重连完成后继续使用。
+
+输入 `/mcp` 查看当前连接状态、已发现工具数、运行时间、失败原因和重试次数，该命令不调用模型：
+
+```text
+MCP Server Status:
+ tavily                connected    5 tools  uptime: 2m
+ filesystem            connected    5 tools  uptime: 2m
+```
+
+项目未创建 `.harness/mcp.json` 时，默认回退到 Tavily 搜索 MCP，工具包括 `tavily_search`、`tavily_extract`、`tavily_crawl`、`tavily_map` 和 `tavily_research`，在 Harness 中显示为 `mcp_tavily_tavily_search` 等名称。密钥放在项目根目录 `.env`：
+
+```dotenv
+TAVILY_API_KEY=你的Tavily密钥
+```
+
+MCP 的 `env` 对象支持 `${VARIABLE}` 引用。Harness 优先读取当前进程环境变量，再读取项目 `.env`；解析后的值只传给对应服务器，不会写入日志。引用缺失或为空时该服务器不会启动，并给出变量名提示。其他没有 `${...}` 的值仍按字面量传递。
+
+首次使用 `npx` 可能需要下载 Node 包，耗时取决于网络；若出现 npx 启动问题，可用 `which npx` 找到完整路径后替换 `command`。
+
+外部工具默认按中风险询问确认。可以使用完整名称配置权限：
+
+```toml
+[tool.harness.permissions]
+allow = ["read_file", "mcp_tavily_tavily_search"]
+deny = ["mcp_tavily_tavily_crawl"]
+```
+
+每个配置文件最多声明 50 台服务器，每台最多发现 200 个工具，单个请求默认超时 120 秒；服务器失败会记录错误并继续加载其他服务器，退出时会关闭全部子进程。MCP 子进程默认不继承 Harness 的 DeepSeek/Tavily 密钥，配置中显式声明或通过 `${VARIABLE}` 引用的环境变量仍可注入。工具服务器仍以当前用户权限运行，也不受文件工具的工作区限制，应只配置可信服务器。不要把真实密钥直接写进 `.harness/mcp.json` 或 `pyproject.toml`。
+
+`python3 -m harness` 默认启用 MCP 配置；直接调用 `run_cli` 的嵌入场景默认关闭。外部工具使用服务器声明的 JSON Schema 展示给模型，本地执行器不会套用内置工具的子集校验，参数合法性由 MCP 服务器自行处理。
+
 ## 项目配置
 
 项目根目录的 `pyproject.toml` 集中管理元信息及非密钥默认配置。启动时通过 Python 标准库 `tomllib` 读取、验证并保存快照，修改配置后重启生效。配置文件位置固定在 Harness 源码根目录，不会从所操作的其他目录加载同名文件；当前仍使用 `python3 -m harness` 从源码运行。
@@ -213,6 +273,7 @@ session_memory = true
 | `[tool.harness.security]` | 默认权限模式与 auto 模式信任目录 |
 | `[tool.harness.swarm]` | Swarm 团队总请求上限与单角色请求上限 |
 | `[tool.harness.presets]` | 项目约定、写后格式化、会话记忆三个预置钩子的开关 |
+| `[tool.harness.mcp]` | MCP 开关与无 `.harness/mcp.json` 时的回退服务器列表 |
 | `[tool.harness.context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
 | `[tool.harness.tools]` 及其 `bash`、`grep` 子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
 | `[tool.harness.pricing]` 及其 `peak` 子表 | 现有费率、币种、核验信息及 UTC 高峰时段 |
@@ -397,6 +458,7 @@ harness/tools/
 | `description` | 能做什么、何时使用、有哪些限制 |
 | `input_schema` | 参数的 JSON Schema，包括类型、必填字段及取值约束 |
 | `supports_cancellation` | 内部标志，默认 `False`；命令执行和搜索设为 `True`，接收会话取消事件，不发送给模型 |
+| `validate_arguments` | 内部标志，默认 `True`；外部 MCP 工具设为 `False`，参数合法性由远端服务器检查，不发送给模型 |
 
 模块还需提供 `execute(arguments, workspace)` 执行函数，成功时返回含简短 `message` 的结果字典，可预期错误使用 `ToolError(code, message)`。定义与执行函数分开，执行函数不会发送给模型。
 
@@ -591,9 +653,10 @@ V0.5 提供三种编排方式：
 | `harness/hooks.py` | 加载并执行会话、消息和工具生命周期 Hooks |
 | `harness/skills.py` | 加载、列出和激活 `.harness/skills/*.json` 技能包 |
 | `harness/presets.py` | 项目约定、写后格式化和会话记忆预置逻辑 |
+| `harness/mcp.py` | MCP 配置加载、连接状态、自动重连、工具发现和调用转发 |
 | `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
-| `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |
+| `harness/tools/definition.py` | `ToolDefinition`、取消能力、参数校验开关及 DeepSeek 格式转换 |
 | `harness/tools/registry.py` | 自动发现、注册和查找工具，生成描述列表 |
 | `harness/tools/executor.py` | 统一参数校验、本地确认、固定工作目录、分发执行与 `ToolError` |
 | `harness/tools/read_file.py` | 按行读取文件及路径、类型、大小和编码校验 |
@@ -631,5 +694,7 @@ V0.5 Agent 编排离线测试通过，覆盖独立预算、后台生命周期、
 项目笔记测试通过，覆盖 Markdown 持久化、启动注入、自动追加、整篇替换确认、路径保护和 CLI 管理。
 
 终端渲染测试通过，覆盖 Markdown 标题、代码块、列表、链接、粗斜体、工具参数与结果面板，以及交互终端和管道输出的不同行为。
+
+MCP 离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、自动重连、DeepSeek 工具名归一化、JSON-RPC 发现与调用、外部 Schema、CLI 合并转发、环境密钥引用和异常消息忽略。
 
 官方依据：[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 。

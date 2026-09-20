@@ -72,6 +72,35 @@ def _permission_rules(value):
     return True
 
 
+def _mcp_servers(value):
+    if not isinstance(value, list) or len(value) > 50:
+        return False
+    names = set()
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        name = item.get("name")
+        command = item.get("command")
+        args = item.get("args", [])
+        env = item.get("env", [])
+        if (not _text(name) or any(character.isspace() for character in name)
+                or name in names or not _text(command)):
+            return False
+        if (not isinstance(args, list)
+                or not all(isinstance(arg, str) for arg in args)):
+            return False
+        if not isinstance(env, list) or not all(
+            isinstance(entry, str) and entry.partition("=")[0] and "=" in entry
+            and "\x00" not in entry
+            and not any(character.isspace() or ord(character) < 32
+                        for character in entry.partition("=")[0])
+            for entry in env
+        ):
+            return False
+        names.add(name)
+    return True
+
+
 def _weekdays(value):
     return isinstance(value, list) and all(type(day) is int and 0 <= day <= 6 for day in value)
 
@@ -111,6 +140,10 @@ _SCHEMA = {
         "project_conventions": lambda value: type(value) is bool,
         "auto_format": lambda value: type(value) is bool,
         "session_memory": lambda value: type(value) is bool,
+    },
+    "mcp": {
+        "enabled": lambda value: type(value) is bool,
+        "servers": _mcp_servers,
     },
     "context": {
         "max_chars": _integer(1), "summary_chars": _integer(1),

@@ -21,7 +21,8 @@ class ToolError(Exception):
 
 
 def create_tool_executor(workspace=None, *, confirm=None, abort=None, permissions=None,
-                         session_cache=None, audit=None, registry=None, background_manager=None):
+                         session_cache=None, audit=None, registry=None, background_manager=None,
+                         extra_tools=None):
     """固定会话启动目录及权限快照，后续调用不随环境改变。"""
     root = (Path.cwd() if workspace is None else Path(workspace)).resolve()
     policy = _get_permissions(permissions)
@@ -37,6 +38,13 @@ def create_tool_executor(workspace=None, *, confirm=None, abort=None, permission
     for item in selected.definitions():
         definition, handler = selected.get(item["function"]["name"])
         registry.register(deepcopy(definition), handler)
+    if extra_tools is not None:
+        if not isinstance(extra_tools, (list, tuple)):
+            raise ValueError("extra_tools 必须是由定义与处理函数组成的列表或元组。")
+        for item in extra_tools:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError("extra_tools 的每项必须包含工具定义和处理函数。")
+            registry.register(deepcopy(item[0]), item[1])
     audit = audit if audit is not None else PermissionAuditLog(root)
     return partial(execute_tool, workspace=root, confirm=confirm, abort=abort,
                    permissions=policy, session_cache=session_cache, audit=audit,
@@ -64,7 +72,8 @@ def execute_tool(name, arguments, *, workspace=None, confirm=None, abort=None, p
     try:
         # 将权限匹配、预览和执行绑定到同一份参数快照。
         arguments = deepcopy(arguments)
-        _validate(arguments, definition.input_schema)
+        if definition.validate_arguments:
+            _validate(arguments, definition.input_schema)
         root = (Path.cwd() if workspace is None else Path(workspace)).resolve()
         if abort is not None and abort.is_set():
             return error("cancelled", "查询已停止，未执行工具。")

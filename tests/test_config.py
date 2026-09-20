@@ -106,6 +106,7 @@ class ConfigTests(unittest.TestCase):
             memory_enabled=True,
             notes_enabled=True,
             hooks_enabled=True,
+            mcp_enabled=True,
         )
 
 

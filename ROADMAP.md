@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.7.2 — Add-Hooks And Skill](https://github.com/MichaelJiangg/harness/releases/tag/v0.7.2) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.7.2`。
+最近公开版本为 [V0.8 — Add-MCP](https://github.com/MichaelJiangg/harness/releases/tag/v0.8) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.8`。
 
 ## 已完成
 
@@ -114,14 +114,23 @@
 - 新增默认启用的预置钩子：项目约定加载、写后自动格式化、会话结束保存记忆；可在 `tool.harness.presets` 中关闭。
 - 新增 `harness/notes.py` 和工作区根目录 `HARNESS.md`：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换长期项目知识；固定单文件、最多 65536 字节，拒绝软链接、目录和二进制内容。
 - CLI 新增 `/notes`、`/notes append <text>`、`/notes replace --yes <text>` 和 `/notes clear --yes`；追加默认放行，整篇替换默认询问，`deny` 始终优先。项目笔记默认只在 CLI 启动入口启用。
+- 新增 `harness/mcp.py` 和 `tool.harness.mcp`：stdio JSON-RPC 客户端支持启动、初始化、工具发现与调用转发；外部工具以 `mcp_<server>_<tool>` 合并，默认中风险询问，服务器失败只跳过该服务器。
+- MCP `env` 支持 `${VARIABLE}` 引用并从进程环境或 `.env` 解析；默认接入 `tavily-mcp@0.2.22`，通过 `${TAVILY_API_KEY}` 注入密钥，真实密钥不进入 TOML、日志或 Git。
+- 新增 `.harness/mcp.json` 统一服务器配置，文件存在时优先于 `pyproject.toml` 回退列表；支持多服务器、命令、参数和环境变量，格式错误停止启动。
+- MCP 管理器增加连接状态、工具数量、运行时间、错误和重试次数追踪；每台服务器有独立后台监控线程，异常退出后自动指数退避重连并重新发现工具。
+- CLI 新增 `/mcp` 状态命令，不调用模型；空闲时根据重连结果刷新当前执行器和模型工具列表。
+- 修复外部 MCP 工具名含冒号导致 DeepSeek HTTP 400 的问题：模型侧工具名归一化为 `mcp_<server>_<tool>`，并处理重连后的名称稳定性。
+- MCP 子进程默认不继承 DeepSeek/Tavily 密钥和动态加载器环境并持续排空 stderr；外部 Schema 关闭本地子集校验，权限、确认、审计和结果预算仍由统一执行器控制。
+- 新增 MCP 配置加载、状态查询、自动重连、环境引用和 CLI 合并转发回归，全量 587 项离线测试通过，并用本地临时 MCP 子进程和默认 Tavily MCP 完成真实 stdio 握手；未发起计费搜索或真实 DeepSeek API。
 
 ## 进行中
 
-- 暂无进行中的开发事项。
+- MCP 集成已完成实现和离线验证，等待版本编号及发布确认。
 
 ## 待办
 
 - 研究模型权限裁决器：设计草案已写入 `todo/model-permission-review.md`，后续先确认白名单与模型裁决的最终顺序、Prompt 契约和 Pro 计费配置，再决定是否实施。
+- 对默认 Tavily MCP 做一次实际搜索调用，验证密钥、结果格式、费用和错误响应；当前已核验真实 `tools/list` 握手，未发起计费搜索。
 - 配置 API 密钥后进行一次真实接口联调。
 - 后续按需求扩展其他工具。
 
@@ -132,6 +141,7 @@
 
 ## 最近验证
 
+- 2026-09-20：统一 MCP 配置与自动重连完成后全量 587 项离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、进程退出重连、外部 Schema、DeepSeek 工具名归一化、CLI 合并转发和环境密钥引用；`python3 -m harness --help`、`python3 -m compileall -q harness tests` 与 `git diff --check` 通过。另用项目 `.env` 和本地 `.harness/mcp.json` 完成 `tavily-mcp@0.2.22` 真实 stdio 握手并发现 5 个工具；带全部外部工具的 DeepSeek 请求由 HTTP 400 修复为 200，Harness 实际对话返回正常。未发起 Tavily 计费搜索，未提交、推送或发布。
 - 2026-09-20：V0.7.2 已发布。远端 `main` 提交为 `a3d3f96a99b949e0031856f09a2a2a2cf0dfadd3`，注解标签对象为 `9229edcad8879a38f4c7866ccfa82e94c682f443`，标签 `v0.7.2` 指向该提交；Release「V0.7.2 - Add-Hooks And Skill」为正式版、非草稿并作为 Latest。远端发布树与本地 100 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：预置钩子完成后全量 576 项离线测试通过，覆盖配置开关、ruff/black 选择、无格式化器降级和会话记忆提示。
 - 2026-09-20：Skills 完成后全量 574 项离线测试通过，覆盖技能加载、列表、激活、工具限制、提示词注入和 `.skill` 后缀。

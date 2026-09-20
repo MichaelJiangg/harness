@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.7.2")
+        self.assertEqual(project["version"], "0.8.0")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], ["rich>=13.0"])
         self.assertEqual(project["readme"], "README.md")
@@ -61,6 +61,15 @@ class ProjectConfigTests(unittest.TestCase):
             "project_conventions": True,
             "auto_format": True,
             "session_memory": True,
+        })
+        self.assertEqual(settings["mcp"], {
+            "enabled": True,
+            "servers": [{
+                "name": "tavily",
+                "command": "npx",
+                "args": ["-y", "tavily-mcp@0.2.22"],
+                "env": ["TAVILY_API_KEY=${TAVILY_API_KEY}"],
+            }],
         })
         self.assertEqual(settings["context"], {
             "max_chars": 64000, "summary_chars": 2000, "keep_recent_turns": 4,
@@ -322,6 +331,42 @@ class ProjectConfigTests(unittest.TestCase):
         settings["permissions"] = {rule: ["bash", "new_tool"] for rule in ("allow", "ask", "deny")}
         settings["permissions"]["rules"] = []
         self.assertEqual(self.load_document(settings)["permissions"], settings["permissions"])
+
+    def test_mcp_servers_are_validated(self):
+        settings = deepcopy(self.defaults)
+        settings["mcp"]["servers"] = [{
+            "name": "filesystem",
+            "command": "mcp-filesystem",
+            "args": ["--root", "."],
+            "env": ["CUSTOM_TOKEN=value"],
+        }]
+        self.assertEqual(
+            self.load_document(settings)["mcp"]["servers"],
+            settings["mcp"]["servers"],
+        )
+        invalid = (
+            None, {}, "filesystem", [None], [{}],
+            [{"name": "", "command": "mcp-filesystem"}],
+            [{"name": "file system", "command": "mcp-filesystem"}],
+            [{"name": "filesystem", "command": ""}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "args": "missing"}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "args": [None]}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "env": "missing"}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "env": ["NO_SEPARATOR"]}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "env": ["=value"]}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "env": ["BAD NAME=value"]}],
+            [{"name": "filesystem", "command": "mcp-filesystem", "env": ["BAD=\x00value"]}],
+            [
+                {"name": "filesystem", "command": "mcp-filesystem"},
+                {"name": "filesystem", "command": "mcp-filesystem"},
+            ],
+        )
+        for servers in invalid:
+            with self.subTest(servers=servers):
+                settings = deepcopy(self.defaults)
+                settings["mcp"]["servers"] = servers
+                with self.assertRaises(ValueError):
+                    self.load_document(settings)
 
     def test_permission_rules_load_from_toml_array_tables_as_original_dicts(self):
         source = self.source.replace("rules = []", "") + r'''

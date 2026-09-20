@@ -1,5 +1,22 @@
 # 版本记录
 
+## V0.8 — Add-MCP
+
+Git 标签：`v0.8`。
+
+- 新增 `harness/mcp.py` stdio MCP 客户端：使用 JSON-RPC 2.0 启动外部服务器、执行初始化、发现工具并转发 `tools/call`。
+- 外部工具以 `mcp_<server>_<tool>` 合并进当前查询，名称会移除冒号等 DeepSeek 不接受的字符；每个服务器最多 200 个工具，单个请求默认超时 120 秒。
+- 修复 `mcp:<server>:<tool>` 工具名导致 DeepSeek HTTP 400 的问题，并保证自动重连后工具名保持稳定。
+- 新增统一服务器配置 `.harness/mcp.json`：按服务器名称配置 `command`、`args` 和 `env`，最多 50 台；文件存在时优先于 `pyproject.toml` 的 MCP 回退列表。
+- MCP 管理器增加连接状态、工具数量、运行时间、错误和重试次数追踪；每台服务器由独立后台线程监控，异常退出后自动指数退避重连并重新发现工具。
+- 新增 `/mcp` 命令，本地查看所有外部服务器状态和工具总数，不调用模型。
+- `tool.harness.mcp` 继续提供 `enabled` 和 `servers` 回退配置；服务器名称唯一，命令、参数和环境条目均在启动时校验。
+- MCP 外部工具默认中风险询问，支持使用完整名称配置 `allow`／`ask`／`deny`；关闭本地 JSON Schema 子集校验，参数合法性由远端服务器处理。
+- MCP `env` 支持 `${VARIABLE}` 引用，从进程环境或项目 `.env` 解析；缺失或为空时跳过对应服务器，不把密钥写入 `pyproject.toml`。
+- 默认接入 Tavily 搜索 MCP：`npx -y tavily-mcp@0.2.22`，通过 `${TAVILY_API_KEY}` 注入 `.env` 密钥，提供 search、extract、crawl、map 和 research 工具。
+- MCP 子进程默认不继承 DeepSeek/Tavily 密钥和动态加载器环境，并持续排空 stderr；单台服务器失败不影响其他服务器，退出时关闭全部子进程。
+- `python3 -m harness` 默认启用 MCP 配置，`run_cli` 嵌入调用默认关闭。
+
 ## V0.7.2 — Add-Hooks And Skill
 
 Git 标签：`v0.7.2`。

@@ -10,6 +10,7 @@ class ToolDefinition:
     description: str
     input_schema: dict
     supports_cancellation: bool = False
+    validate_arguments: bool = True
 
     def to_deepseek(self):
         """将内部 input_schema 转换为 DeepSeek 的 function.parameters。"""

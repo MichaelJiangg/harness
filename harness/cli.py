@@ -4,6 +4,7 @@ import json
 import shlex
 import sys
 from copy import deepcopy
+from functools import partial
 from pathlib import Path
 from threading import Event, Lock, Thread
 
@@ -18,6 +19,7 @@ from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .hooks import HookManager
+from .mcp import MCPManager, load_server_configs
 from .memory import (
     MemoryStore, VectorMemoryStore, format_record, format_recall_result,
     has_memory_candidates, memory_system_prompt, recall_memories, summarize_session,
@@ -49,6 +51,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 /skill [list|off|<技能名>]  查看和激活可复用技能包
 /notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
 /activity [latest|all|clear]  查看后台工具、请求和编排活动
+/mcp  查看外部工具服务器连接状态
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
 /compact  压缩旧对话，保留最近几轮
 /help  查看帮助
@@ -74,6 +77,7 @@ BRIEF_HELP = """直接输入任务开始：
 /help               完整帮助
 
 输入 /activity 查看后台执行记录
+输入 /mcp 查看外部服务器状态
 输入 /exit 退出"""
 
 ACTIVITY_DEFAULT_COUNT = 50
@@ -83,12 +87,28 @@ ACTIVITY_MAX_EVENTS = 500
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
             character_delay=None, memory_enabled=False, memory_store=None,
             notes_enabled=False, notes_store=None, vector_store=None,
-            hooks_enabled=False, hooks_manager=None):
+            hooks_enabled=False, hooks_manager=None, mcp_enabled=False):
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
     presets = get_settings()["presets"]
     memory_enabled = memory_enabled and presets["session_memory"]
     notes_enabled = notes_enabled and presets["project_conventions"]
+    mcp_settings = get_settings()["mcp"]
+    mcp_enabled = mcp_enabled and mcp_settings["enabled"]
+    mcp_manager = None
+    mcp_errors = []
+    mcp_definitions = []
+    mcp_config_source = "pyproject.toml"
+    mcp_change_event = Event()
+    if mcp_enabled:
+        configs, mcp_config_source = load_server_configs()
+        mcp_manager = MCPManager(
+            configs,
+            on_change=lambda *_: mcp_change_event.set(),
+        )
+        mcp_definitions = mcp_manager.tool_definitions()
+        mcp_errors = mcp_manager.load_errors
+        mcp_change_event.clear()
     ledger = ledger if ledger is not None else UsageLedger()
     input_stream = input_stream if input_stream is not None else sys.stdin
     output = output if output is not None else sys.stdout
@@ -140,6 +160,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     else:
         hook_manager = HookManager(Path("/__harness_hooks_disabled__"))
     skill_manager = SkillManager(Path.cwd())
+    available_tool_definitions = (
+        get_tool_definitions()
+        + [definition.to_deepseek() for definition in mcp_definitions]
+    )
     hook_start_result = hook_manager.run("session_start", {})
     base_system_content = notes_system_prompt(SYSTEM_PROMPT, notes_content)
     if hook_start_result.prompts:
@@ -567,7 +591,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 write(f"未找到技能：{parts[1]}。输入 /skill 查看可用技能。")
                 return
             available_names = {
-                item["function"]["name"] for item in get_tool_definitions()
+                item["function"]["name"] for item in available_tool_definitions
             }
             missing = [name for name in skill.tools if name not in available_names]
             if missing:
@@ -616,7 +640,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             "notes_append": "追加项目笔记", "notes_replace": "替换项目笔记",
             "web_fetch": "网页读取",
             "web_search": "网页搜索",
-        }.get(name, "工具调用")
+        }.get(name, "外部 MCP 工具" if name.startswith("mcp_") else "工具调用")
         if not terminal:
             write(f"[确认] 非交互模式无法确认{label}，已拒绝本次操作。")
             return False
@@ -787,9 +811,62 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 mode=permission_mode, auto_directories=auto_directories,
                 **settings["permissions"],
             )
+        if mcp_definitions:
+            kwargs["extra_tools"] = [
+                (
+                    definition,
+                    partial(mcp_manager.execute, internal_name=definition.name),
+                )
+                for definition in mcp_definitions
+            ]
         return create_tool_executor(**kwargs)
 
     tool_executor = build_tool_executor()
+
+    def refresh_mcp_tools():
+        nonlocal mcp_definitions, mcp_errors, available_tool_definitions, tool_executor
+        mcp_definitions = mcp_manager.tool_definitions()
+        mcp_errors = mcp_manager.load_errors
+        available_tool_definitions = (
+            get_tool_definitions()
+            + [definition.to_deepseek() for definition in mcp_definitions]
+        )
+        tool_executor = build_tool_executor()
+
+    def render_mcp_status(*, total=False):
+        if mcp_manager is None:
+            write("MCP 未启用。")
+            return
+        write("MCP Server Status:")
+        for status in mcp_manager.status():
+            name = status["name"]
+            state = status["state"]
+            count = status["tool_count"]
+            if state == "connected":
+                uptime = _format_uptime(status["uptime_seconds"])
+                write(
+                    f" {name:<20}  connected    {count} tools  uptime: {uptime}",
+                    style="green",
+                )
+            else:
+                style = "yellow" if state in {"connecting", "reconnecting"} else "red"
+                write(
+                    f" {name:<20}  {state:<11}  {count} tools  attempts: {status['attempts']}",
+                    style=style,
+                )
+                if status["last_error"]:
+                    write(
+                        f"  error: {_preview_text(status['last_error'], multiline=False)}",
+                        style="red",
+                    )
+        if total:
+            builtin_count = len(get_tool_definitions())
+            write(
+                f"[mcp] Total: {len(mcp_definitions)} external tools "
+                f"+ {builtin_count} built-in tools = "
+                f"{len(mcp_definitions) + builtin_count} tools",
+                style="cyan",
+            )
 
     def on_event(event):
         if abort.is_set():
@@ -956,6 +1033,32 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             console.print(Text(BRIEF_HELP, style="dim"), soft_wrap=True)
     else:
         write(f"{PRODUCT_NAME} · {PRODUCT_SUBTITLE}\n{BRIEF_HELP}")
+    if mcp_manager is not None:
+        if mcp_config_source == ".harness/mcp.json":
+            write(
+                "[mcp] Loading server config from .harness/mcp.json",
+                style="cyan",
+            )
+        for status in mcp_manager.status():
+            name = status["name"]
+            if status["state"] == "connected":
+                write(
+                    f"[mcp] Connecting to {name}... OK ({status['tool_count']} tools)",
+                    style="cyan",
+                )
+                names = mcp_manager.tool_names(name)
+                write(f"[mcp] Tools merged: {', '.join(names)}", style="cyan")
+            else:
+                write(f"[mcp] Connecting to {name}... FAILED", style="red")
+                if status["last_error"]:
+                    write(f"[mcp] {status['last_error']}", style="red")
+        builtin_count = len(get_tool_definitions())
+        write(
+            f"[mcp] Total: {len(mcp_definitions)} external tools "
+            f"+ {builtin_count} built-in tools = "
+            f"{len(mcp_definitions) + builtin_count} tools",
+            style="cyan",
+        )
     if memory_enabled:
         if semantic_memory:
             write("[memory] 向量记忆已启用。", style="dim")
@@ -985,6 +1088,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if worker:
                     worker.join()
                 background_manager.shutdown()
+                if mcp_manager is not None:
+                    mcp_manager.close()
                 save_memory_summary()
                 finish_session_hooks()
                 return
@@ -995,6 +1100,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if worker:
                     worker.join(timeout=1)
                 background_manager.shutdown()
+                if mcp_manager is not None:
+                    mcp_manager.close()
                 with output_lock:
                     end_stream_line()
                 save_memory_summary()
@@ -1029,6 +1136,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 handle_skill_command(text)
             elif text.startswith("/recall"):
                 handle_recall_command(text)
+            elif text == "/mcp":
+                if mcp_change_event.is_set():
+                    mcp_change_event.clear()
+                    refresh_mcp_tools()
+                render_mcp_status(total=True)
             elif text.startswith("/activity"):
                 handle_activity_command(text)
             elif text == "/cost":
@@ -1046,6 +1158,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             elif worker and worker.is_alive():
                 write("上一轮查询进行中，请等待回答；期间可以输入 /cost。")
             else:
+                if mcp_change_event.is_set():
+                    mcp_change_event.clear()
+                    refresh_mcp_tools()
+                    write("[mcp] 外部工具列表已刷新。", style="cyan")
                 hook_result = hook_manager.run(
                     "before_send_message", {"message": text},
                 )
@@ -1055,7 +1171,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 inject_memory_for_query(text)
                 turn += 1
                 compact = text == "/compact"
-                query_tools = get_tool_definitions()
+                query_tools = available_tool_definitions
                 if active_skill is not None:
                     allowed = set(active_skill.tools)
                     query_tools = [
@@ -1077,6 +1193,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if worker:
             worker.join(timeout=1)
         background_manager.shutdown()
+        if mcp_manager is not None:
+            mcp_manager.close()
         finish_session_hooks()
         write("\n查询已停止。")
 
@@ -1143,6 +1261,19 @@ def _activity_message(event):
                 "swarm_complete", "swarm_failed"}:
         return f"{kind}：{event.get('description', '') or event.get('from', '') or event.get('to', '')}"
     return ""
+
+
+def _format_uptime(seconds):
+    if seconds is None or seconds < 0:
+        return "unknown"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
 
 
 def _confirmation_risk(name, arguments):
