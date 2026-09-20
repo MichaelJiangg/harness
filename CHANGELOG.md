@@ -1,5 +1,12 @@
 # 版本记录
 
+## V1.0.2 — bugfix-模型切换
+
+Git 标签：`v1.0.2`。
+
+- 修复 `/model deepseek-pro` 因模型名错误导致的 HTTP 400：`deepseek-pro` 保留为展示别名，实际发送 DeepSeek API 模型名 `deepseek-v4-pro`。
+- `/model` 现在按模型级列出 DeepSeek／GLM 的 Flash／Pro 模型并标记当前模型；`--model` 自动推断 provider 并解析别名，显式 `--provider` 与模型冲突时启动报错。
+
 ## V1.0.1 — bugfix
 
 Git 标签：`v1.0.1`。

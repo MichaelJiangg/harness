@@ -84,6 +84,33 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "HARNESS_PROVIDER"):
                 config.select_model_provider(env_file=path, environ={})
 
+    def test_provider_for_model_recognizes_catalog_and_prefix(self):
+        self.assertEqual(config.provider_for_model("deepseek-flash"), "deepseek")
+        self.assertEqual(config.provider_for_model("deepseek-pro"), "deepseek")
+        self.assertEqual(config.provider_for_model("glm-5.3-flash"), "glm")
+        self.assertEqual(config.provider_for_model("glm-5.3-pro"), "glm")
+        self.assertEqual(config.provider_for_model("glm-custom"), "glm")
+        self.assertIsNone(config.provider_for_model("unknown-model"))
+        self.assertIsNone(config.provider_for_model(""))
+
+    def test_resolve_model_name_maps_alias_to_api_model(self):
+        self.assertEqual(config.resolve_model_name("deepseek-flash"), "deepseek-flash")
+        self.assertEqual(config.resolve_model_name("deepseek-pro"), "deepseek-v4-pro")
+        self.assertEqual(config.resolve_model_name("deepseek-v4-pro"), "deepseek-v4-pro")
+        self.assertEqual(config.resolve_model_name("glm-5.3-pro"), "glm-5.3-pro")
+        self.assertEqual(config.resolve_model_name("custom-model"), "custom-model")
+
+    def test_model_catalog_includes_configured_default_names(self):
+        settings = {
+            "model": {"name": "custom-deepseek"},
+            "glm": {"name": "glm-5.3-pro"},
+        }
+        catalog = config.model_catalog(settings)
+        self.assertEqual(catalog["deepseek-flash"]["provider"], "deepseek")
+        self.assertEqual(catalog["deepseek-pro"]["model"], "deepseek-v4-pro")
+        self.assertEqual(catalog["custom-deepseek"]["provider"], "deepseek")
+        self.assertEqual(catalog["glm-5.3-pro"]["label"], "GLM Pro")
+
     def test_supported_value_syntax_and_custom_file_path(self):
         examples = (
             ("DEEPSEEK_API_KEY=test-value", "test-value"),

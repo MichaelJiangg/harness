@@ -6,6 +6,8 @@ from .config import (
     get_settings,
     load_api_key,
     load_glm_api_key,
+    provider_for_model,
+    resolve_model_name,
     select_model_provider,
 )
 
@@ -21,24 +23,36 @@ def create_app(*, client=None, provider=None, model=None):
     if client is None:
         requested_provider = provider or settings.get("provider", "auto")
         if requested_provider == "auto":
-            provider, api_key = select_model_provider()
+            inferred_provider = provider_for_model(model)
+            if inferred_provider is None:
+                provider, api_key = select_model_provider()
+            else:
+                provider = inferred_provider
+                api_key = (
+                    load_api_key()
+                    if provider == "deepseek"
+                    else load_glm_api_key()
+                )
         else:
             provider = requested_provider
+            inferred_provider = provider_for_model(model)
+            if inferred_provider is not None and inferred_provider != provider:
+                raise ValueError(
+                    f"模型 {model} 属于 {inferred_provider}，与 --provider {provider} 不匹配。"
+                )
             api_key = (
                 load_api_key()
                 if provider == "deepseek"
                 else load_glm_api_key()
             )
-            if not isinstance(api_key, str) or not api_key.strip():
-                key_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "GLM_API_KEY"
-                raise ValueError(f"未配置 {key_name}，无法使用 provider={provider}。")
-        selected_model = settings["model"]["name"]
-        if provider == "glm" and settings["model"]["name"] == "deepseek-flash":
-            selected_model = settings["glm"]["name"]
+        if not isinstance(api_key, str) or not api_key.strip():
+            key_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "GLM_API_KEY"
+            raise ValueError(f"未配置 {key_name}，无法使用 provider={provider}。")
+        selected_model = settings["glm"]["name"] if provider == "glm" else settings["model"]["name"]
         client = ChatCompletionClient(
             api_key,
             provider=provider,
-            model=model or selected_model,
+            model=resolve_model_name(model) if model else selected_model,
         )
 
     def start(*, ledger=None, input_stream=None, output=None, error_output=None,

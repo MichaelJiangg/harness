@@ -279,6 +279,62 @@ _DEFAULT_SETTINGS = {
 
 _PROCESS_SETTINGS = None
 
+MODEL_CATALOG = {
+    "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash"},
+    "deepseek-pro": {"provider": "deepseek", "model": "deepseek-v4-pro", "label": "DeepSeek Pro"},
+    "glm-5.3-flash": {"provider": "glm", "model": "glm-5.3-flash", "label": "GLM Flash"},
+    "glm-5.3-pro": {"provider": "glm", "model": "glm-5.3-pro", "label": "GLM Pro"},
+}
+
+
+def provider_for_model(model):
+    """根据模型名推断 provider；无法识别时返回 None。"""
+    if not isinstance(model, str) or not model.strip():
+        return None
+    name = model.strip()
+    details = MODEL_CATALOG.get(name)
+    if details is not None:
+        return details["provider"]
+    if name.startswith("deepseek"):
+        return "deepseek"
+    if name.startswith("glm"):
+        return "glm"
+    return None
+
+
+def model_catalog(settings=None):
+    """返回可供 /model 热切换的模型目录，同时纳入配置中的默认模型名。"""
+    settings = get_settings() if settings is None else settings
+    catalog = {
+        name: {
+            "model": details.get("model", name),
+            "provider": details["provider"],
+            "label": details["label"],
+        }
+        for name, details in MODEL_CATALOG.items()
+    }
+    for provider, section in (("deepseek", "model"), ("glm", "glm")):
+        name = settings[section]["name"]
+        if name and name not in catalog and not any(
+            details["model"] == name for details in catalog.values()
+        ):
+            catalog[name] = {
+                "model": name,
+                "provider": provider,
+                "label": "DeepSeek" if provider == "deepseek" else "GLM",
+            }
+    return catalog
+
+
+def resolve_model_name(model):
+    """把 /model 别名解析成真实 API 模型名；无法解析时原样返回。"""
+    if not isinstance(model, str) or not model.strip():
+        return model
+    name = model.strip()
+    details = MODEL_CATALOG.get(name)
+    return details.get("model", name) if details else name
+
+
 _DEFAULT_CONFIG_TEMPLATE = """\
 # Delin Harness 运行时配置。
 # 此文件只需写需要覆盖的字段；未写的字段使用内置默认值。
@@ -289,6 +345,7 @@ provider = "auto"
 [model]
 # auto 优先使用 DEEPSEEK_API_KEY；没有 DeepSeek key 时回退 GLM_API_KEY。
 name = "deepseek-flash"
+# 可选模型：deepseek-v4-pro
 
 [engine]
 # 单个会话允许的用户轮数上限。
@@ -299,6 +356,11 @@ context_window = 64000
 [tools]
 # Bash 工具默认超时时间，单位秒。
 timeout = 30
+
+[glm]
+# GLM provider 使用的默认模型，取消注释即可切换。
+name = "glm-5.3-flash"
+# 可选模型：glm-5.3-pro
 
 [mcp]
 enabled = true

@@ -56,6 +56,33 @@ class AppAssemblyTests(unittest.TestCase):
         client_factory.assert_not_called()
         self.assertIs(run_cli.call_args.args[0], client)
 
+    def test_create_app_infers_provider_from_model_argument(self):
+        client = Mock(provider="glm")
+        settings = {
+            "provider": "auto",
+            "model": {"name": "deepseek-flash"},
+            "glm": {"name": "glm-5.3-flash"},
+        }
+        with patch.object(app, "get_settings", return_value=settings), \
+                patch.object(app, "load_glm_api_key", return_value="glm-test-key") as load_key, \
+                patch.object(app, "ChatCompletionClient", return_value=client) as client_factory, \
+                patch.object(app, "run_cli"):
+            create_app(model="glm-5.3-pro")
+        load_key.assert_called_once_with()
+        client_factory.assert_called_once_with(
+            "glm-test-key", provider="glm", model="glm-5.3-pro",
+        )
+
+    def test_create_app_rejects_mismatched_provider_and_model(self):
+        settings = {
+            "provider": "auto",
+            "model": {"name": "deepseek-flash"},
+            "glm": {"name": "glm-5.3-flash"},
+        }
+        with patch.object(app, "get_settings", return_value=settings):
+            with self.assertRaisesRegex(ValueError, "与 --provider"):
+                create_app(provider="deepseek", model="glm-5.3-flash")
+
     def test_only_create_app_is_exported(self):
         self.assertEqual(app.__all__, ["create_app"])
 

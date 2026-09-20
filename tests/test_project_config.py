@@ -141,13 +141,13 @@ timeout = 20
             with self.assertRaises(SystemExit) as raised:
                 config.parse_cli_args(["--version"])
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "Harness v1.0.1")
+        self.assertEqual(output.getvalue().strip(), "Harness v1.0.2")
 
     def test_pyproject_keeps_only_package_metadata(self):
         path = Path(config.__file__).resolve().parent.parent / "pyproject.toml"
         document = config.tomllib.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(document["project"]["name"], "michael-harness")
-        self.assertEqual(document["project"]["version"], "1.0.1")
+        self.assertEqual(document["project"]["version"], "1.0.2")
         self.assertEqual(document["project"]["authors"], [{"name": "Michael Jiang"}])
         self.assertEqual(
             document["project"]["scripts"],

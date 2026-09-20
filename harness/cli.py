@@ -20,7 +20,7 @@ from rich.text import Text
 from .background import BackgroundManager, COMPLETED
 from .client import ChatCompletionClient, DEFAULT_MODEL
 from .commands import CommandContext, command_entries, resolve_command
-from .config import get_settings, load_api_key, load_glm_api_key
+from .config import get_settings, load_api_key, load_glm_api_key, model_catalog
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .hooks import HookManager
 from .interruptible_input import (
@@ -89,7 +89,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 {_format_command_help()}"""
 
 PRODUCT_NAME = "Delin Harness"
-PRODUCT_SUBTITLE = "Powered by Codex · v1.0"
+PRODUCT_SUBTITLE = "Powered by Codex · v1.0.2"
 BRIEF_HELP = """Try:
 
 1. 帮我调研 Personal Agent 的国内外竞品，包括 MUSE、Today 等。
@@ -1175,15 +1175,20 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     def switch_model(target):
         nonlocal client, active_model, active_label, active_subtitle, active_pricing
-        current_provider = "deepseek" if active_label == "DeepSeek" else "glm"
-        if target == current_provider:
+        details = available_models.get(target)
+        if details is None:
+            raise ValueError(f"未知模型：{target}")
+        if details["model"] == active_model:
             write(f"当前已使用 {target}。")
             return False
-        api_key = load_api_key() if target == "deepseek" else load_glm_api_key()
+        provider = details["provider"]
+        api_key = load_api_key() if provider == "deepseek" else load_glm_api_key()
         if not isinstance(api_key, str) or not api_key.strip():
-            key_name = "DEEPSEEK_API_KEY" if target == "deepseek" else "GLM_API_KEY"
+            key_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "GLM_API_KEY"
             raise ValueError(f"未配置 {key_name}，无法切换到 {target}。")
-        new_client = ChatCompletionClient(api_key, provider=target)
+        new_client = ChatCompletionClient(
+            api_key, provider=provider, model=details["model"],
+        )
         client = new_client
         active_model = new_client.model
         active_label = new_client.label
@@ -1326,16 +1331,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         worker.start()
 
     model_settings = get_settings()
-    available_models = {
-        "deepseek": {
-            "model": model_settings["model"]["name"],
-            "label": "DeepSeek",
-        },
-        "glm": {
-            "model": model_settings["glm"]["name"],
-            "label": "GLM",
-        },
-    }
+    available_models = model_catalog(model_settings)
 
     def make_command_context(*, busy):
         return CommandContext(

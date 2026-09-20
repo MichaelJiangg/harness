@@ -253,21 +253,51 @@ class CLITests(unittest.TestCase):
         ):
             run_cli(
                 Mock(),
-                input_stream=StringIO("/model\n/model deepseek\n/model glm\n/model invalid\n/exit\n"),
+                input_stream=StringIO("/model\n/model deepseek-flash\n/model glm-5.3-flash\n/model invalid\n/exit\n"),
                 output=output,
                 error_output=errors,
             )
         text = output.getvalue()
         self.assertIn("Current model: deepseek-flash", text)
-        self.assertIn("glm — glm-5.3-flash (GLM)", text)
+        self.assertIn("glm-5.3-flash — glm-5.3-flash (GLM Flash)", text)
         self.assertIn("切换示例：", text)
-        self.assertIn("  /model deepseek", text)
-        self.assertIn("  /model glm", text)
-        self.assertIn("当前已使用 deepseek。", text)
+        self.assertIn("  /model deepseek-flash", text)
+        self.assertIn("  /model glm-5.3-pro", text)
+        self.assertIn("当前已使用 deepseek-flash。", text)
         self.assertNotIn("已切换到 deepseek-flash", text)
-        self.assertIn("已切换到 glm-5.3-flash（GLM）。", text)
-        self.assertIn("用法：/model [deepseek|glm]", text)
-        factory.assert_called_once_with("glm-test-key", provider="glm")
+        self.assertIn("已切换到 glm-5.3-flash（GLM Flash）。", text)
+        self.assertIn("用法：/model [deepseek-flash|deepseek-pro|glm-5.3-flash|glm-5.3-pro]", text)
+        factory.assert_called_once_with(
+            "glm-test-key", provider="glm", model="glm-5.3-flash",
+        )
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_model_command_resolves_deepseek_pro_alias_to_api_model(self):
+        switched = Mock(
+            model="deepseek-v4-pro",
+            label="DeepSeek",
+            pricing={
+                "input_hit_per_million": 0.022,
+                "input_miss_per_million": 0.66,
+                "output_per_million": 1.98,
+                "currency": "USD",
+            },
+        )
+        output = StringIO()
+        errors = StringIO()
+        with patch("harness.cli.ChatCompletionClient", return_value=switched) as factory, patch(
+            "harness.cli.load_api_key", return_value="deepseek-test-key"
+        ):
+            run_cli(
+                Mock(),
+                input_stream=StringIO("/model deepseek-pro\n/exit\n"),
+                output=output,
+                error_output=errors,
+            )
+        factory.assert_called_once_with(
+            "deepseek-test-key", provider="deepseek", model="deepseek-v4-pro",
+        )
+        self.assertIn("已切换到 deepseek-v4-pro（DeepSeek Pro）。", output.getvalue())
         self.assertEqual(errors.getvalue(), "")
 
     def test_tools_command_lists_available_tools_without_model_request(self):

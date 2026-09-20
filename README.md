@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V1.0.1 — bugfix**（Git 标签 `v1.0.1`）。修复 auto provider 优先级并增强模型切换提示。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V1.0.2 — bugfix-模型切换**（Git 标签 `v1.0.2`）。修复模型热切换并映射 DeepSeek Pro API 模型名。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 安装
 
@@ -72,7 +72,7 @@ harness
 | `/help` | 显示帮助和所有可用命令 |
 | `/clear` | 清空当前对话，保留项目笔记、记忆和已激活技能 |
 | `/history` | 显示当前对话历史 |
-| `/model [deepseek\|glm]` | 查看当前模型和切换示例，或切换 DeepSeek／GLM |
+| `/model [模型名]` | 查看当前模型并列出可热切换模型，或直接切换模型 |
 | `/cost` | 查询本次会话用量、USD 预估费用和逐请求明细，不调用模型；等待回答时也可使用 |
 | `/compact` | 空闲时让模型总结旧对话，保留最近几轮；摘要请求计入 `/cost` |
 | `/tools` | 查看当前可用的内置和外部 MCP 工具 |
@@ -323,6 +323,7 @@ API key 继续放在 `.env` 或环境变量中，不进入 TOML。可用 `--show
 # .harness/config.toml
 [model]
 name = "deepseek-flash"
+# 可选模型：deepseek-v4-pro
 
 [engine]
 max_turns = 100
@@ -330,6 +331,10 @@ context_window = 64000
 
 [tools]
 timeout = 30
+
+[glm]
+name = "glm-5.3-flash"
+# 可选模型：glm-5.3-pro
 
 [mcp]
 enabled = true
@@ -348,6 +353,8 @@ servers = [
 | `[permissions]` | 工具的放行、询问和拒绝规则 |
 
 配置文件可以只写需要覆盖的字段，最终快照仍按完整 Schema 校验，不接受未知键、无效类型或超出对应范围的数值；默认值必须符合对应上限。搜索结果预算必须比总工具预算至少少 500 字符，且至少为单行字符限制的 6 倍加 400 字符，为 JSON 转义和结果字段留出空间。命令每路输出预算最少 128 字节，足以容纳首尾片段与截断提示。配置错误时停止启动并显示字段说明，不回退到更宽松的权限。
+
+会话中可直接用 `/model` 查看并热切换模型。内置模型目录包含 `deepseek-flash`、`deepseek-pro`、`glm-5.3-flash`、`glm-5.3-pro`；其中 `deepseek-pro` 是展示别名，实际发送给 API 的模型名为 `deepseek-v4-pro`。修改 `[model].name` 或 `[glm].name` 后，该模型名也会加入目录，重启后可用。`--model` 会按模型名自动推断 provider 并解析别名，避免 `--model glm-5.3-pro` 被误挂到 DeepSeek；同时显式指定冲突的 `--provider` 会直接报错。
 
 `CLAUDE.md` 保留开发规范，`ROADMAP.md` 保留进度。下文数值均为内置默认值，修改后会同时更新实际执行、工具参数约束和相应说明。
 
