@@ -1,6 +1,7 @@
 """终端交互和本地命令；模型请求在后台运行，等待时仍可查看 /cost。"""
 
 import json
+import select
 import shlex
 import sys
 from copy import deepcopy
@@ -22,6 +23,13 @@ from .commands import CommandContext, command_entries, resolve_command
 from .config import get_settings, load_api_key, load_glm_api_key
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
 from .hooks import HookManager
+from .interruptible_input import (
+    EOF as INPUT_EOF,
+    IDLE as INPUT_IDLE,
+    INTERRUPT,
+    read_interruptible_line,
+    terminal_cbreak,
+)
 from .mcp import MCPManager, load_server_configs
 from .memory import (
     MemoryStore, VectorMemoryStore, format_record, format_recall_result,
@@ -35,6 +43,11 @@ from .tools import create_tool_executor, get_tool_definitions
 from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
 from .tools.swarm import DEFAULT_ROLES as DEFAULT_SWARM_ROLES
 from .usage import UsageLedger, format_cost, format_usage
+
+try:
+    import readline as _readline  # noqa: F401
+except ImportError:
+    _readline = None
 
 _BUILTIN_COMMAND_HELP = {
     "/mode": "切换权限模式；auto 模式信任当前或指定工作目录",
@@ -69,7 +82,8 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 耗时测试、批量命令和大型独立分析可通过 background_submit 提交后台，background_check 查询状态和结果。
 多角色接力任务可通过 swarm 启动团队协作，角色拥有独立上下文并按交接协议传递成果。
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
-交互终端输入：回车换行，连续两个空行发送；模型执行期间的确认与本地命令仍为单行即时响应。
+交互终端输入：单行直接回车发送；行尾 \\ 续行或粘贴多行时回车换行、连续两个空行发送。模型执行期间的确认与本地命令仍为单行即时响应。
+模型回答或工具执行期间按 Esc 中断。
 
 {_format_command_help()}"""
 
@@ -158,6 +172,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     output = output if output is not None else sys.stdout
     error_output = error_output if error_output is not None else sys.stderr
     terminal = input_stream.isatty() and output.isatty()
+    native_terminal_input = (
+        terminal and input_stream is sys.stdin and output is sys.stdout
+    )
     console = Console(
         file=output, force_terminal=terminal, highlight=True, color_system="standard",
         no_color=False,
@@ -250,16 +267,20 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     def show_prompt():
         nonlocal prompt_shown
         with output_lock:
-            if terminal and not prompt_shown and not input_closed and not abort.is_set():
+            if (terminal and not native_terminal_input and not prompt_shown
+                    and not input_closed and not abort.is_set()):
                 console.print(Text("你", style="bold cyan"), end=" ")
                 console.print(Text(">", style="bold cyan"), end=" ")
                 prompt_shown = True
+
+    def continuation_prompt_text(line_number):
+        return f"... {line_number}│ "
 
     def show_continuation_prompt(line_number):
         if terminal and not input_closed and not abort.is_set():
             with output_lock:
                 console.print(
-                    Text(f"... {line_number}│", style="bold cyan"),
+                    Text(continuation_prompt_text(line_number), style="bold cyan"),
                     end=" ",
                 )
 
@@ -1355,11 +1376,50 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             busy = worker is not None and worker.is_alive()
             multiline_input = terminal and not busy
             if multiline_input:
+                if native_terminal_input:
+                    read_line = lambda prompt: input(prompt)
+                else:
+                    def read_line(prompt):
+                        if terminal and prompt:
+                            with output_lock:
+                                console.print(Text(prompt, style="bold cyan"), end=" ")
+                        raw_line = input_stream.readline()
+                        if raw_line == "":
+                            raise EOFError
+                        return raw_line.rstrip("\r\n")
+                has_pending_input = (
+                    lambda: bool(select.select([input_stream.fileno()], [], [], 0)[0])
+                    if native_terminal_input else None
+                )
                 try:
-                    text = _read_multiline_text(input_stream, show_continuation_prompt)
+                    text = _read_multiline_text(
+                        read_line,
+                        continuation_prompt_text,
+                        first_prompt="你 > " if native_terminal_input else "",
+                        has_pending_input=has_pending_input,
+                    )
                 except EOFError:
                     finish_eof()
                     return
+            elif terminal and input_stream is sys.stdin:
+                with terminal_cbreak(input_stream.fileno()):
+                    interrupted = read_interruptible_line(
+                        input_stream.fileno(), output, output_lock,
+                        should_continue=lambda: worker is not None and worker.is_alive(),
+                    )
+                if interrupted is INPUT_IDLE:
+                    continue
+                if interrupted is INTERRUPT:
+                    abort.set()
+                    cancel_confirmation()
+                    abort = Event()
+                    tool_executor = build_tool_executor()
+                    write("\n查询已停止。")
+                    continue
+                if interrupted is INPUT_EOF:
+                    finish_eof()
+                    return
+                text = interrupted.strip()
             else:
                 line = input_stream.readline()
                 if not line:
@@ -1485,18 +1545,32 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         write("\n查询已停止。")
 
 
-def _read_multiline_text(input_stream, continuation_prompt):
-    """终端模式按行累积，连续两个空行时返回；EOF 抛出 EOFError。"""
+def _read_multiline_text(read_line, next_prompt, *, first_prompt="", has_pending_input=None):
+    """按行累积输入，连续两个空行时返回；EOF 抛出 EOFError。"""
     lines = []
+    prompt = first_prompt
+    first = True
     while True:
-        raw_line = input_stream.readline()
-        if raw_line == "":
+        try:
+            raw_line = read_line(prompt)
+        except EOFError:
             raise EOFError
         line = raw_line.rstrip("\r\n")
+        if first:
+            first = False
+            if not line:
+                return ""
+            multiline = line.endswith("\\")
+            if multiline:
+                line = line[:-1]
+            elif has_pending_input is not None and has_pending_input():
+                multiline = True
+            else:
+                return line
         if line == "" and lines and lines[-1] == "":
             return "\n".join(lines[:-1])
         lines.append(line)
-        continuation_prompt(len(lines))
+        prompt = next_prompt(len(lines))
 
 
 def _tool_result_summary(name, result):
