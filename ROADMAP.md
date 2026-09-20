@@ -156,6 +156,7 @@
 
 ## 最近验证
 
+- 2026-09-21：V1.0.4 已发布。远端 `main` 提交为 `e7e19769ac905eb04d93d506d752e7c82996a9aa`，注解标签对象为 `1b95a7b01ead88d69e20f72691331d97363c0e03`，标签 `v1.0.4` 指向该提交；Release「V1.0.4 - bugfix-上下文断档」为正式版、非草稿并作为 Latest。
 - 2026-09-21：修复流式回答滚动残留、Esc 长文本中断和中断上下文：终端流式渲染改用 `transient` 且 `vertical_overflow="crop"` 的 Live 预览，完成后渲染完整 Markdown Panel；Esc 使用独立 `query_interrupted` 状态，立即固化已生成前缀、停止继续接收流式文本，并把可见前缀作为 assistant 上下文写回会话，使下一轮可以继续未完成内容。全量 611 项离线测试通过。
 - 2026-09-21：V1.0.3 已发布。远端 `main` 提交为 `54bf9223936897e0e4cfec4f6b62a5bba4db931e`，注解标签对象为 `e31ac1c9a03d668212da9d963fb3aac1e5e76bd9`，标签 `v1.0.3` 指向该提交；Release「V1.0.3 - bugfix-乱码修复」为正式版、非草稿并作为 Latest。
 - 2026-09-21：修复交互终端 busy 输入乱码：`terminal_cbreak` 增加关闭 `ECHO`，`read_interruptible_line` 对可打印字符和回车手动回显，避免方向键等控制序列被终端直接输出；流式 Markdown 统一经过控制字符清洗。全量 609 项离线测试通过。
