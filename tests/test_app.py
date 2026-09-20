@@ -8,7 +8,12 @@ from harness.app import create_app
 class AppAssemblyTests(unittest.TestCase):
     def test_create_app_returns_callable_assembled_entry(self):
         client = Mock(provider="deepseek")
-        settings = {"mcp": {"enabled": True}}
+        settings = {
+            "provider": "auto",
+            "model": {"name": "deepseek-flash"},
+            "glm": {"name": "glm-5.3-flash"},
+            "mcp": {"enabled": True},
+        }
         with patch.object(app, "get_settings", return_value=settings) as get_settings, \
                 patch.object(app, "select_model_provider", return_value=("deepseek", "test-key")) as select, \
                 patch.object(app, "ChatCompletionClient", return_value=client) as client_factory, \
@@ -17,7 +22,9 @@ class AppAssemblyTests(unittest.TestCase):
             start()
         get_settings.assert_called_once_with()
         select.assert_called_once_with()
-        client_factory.assert_called_once_with("test-key", provider="deepseek")
+        client_factory.assert_called_once_with(
+            "test-key", provider="deepseek", model="deepseek-flash",
+        )
         self.assertTrue(callable(start))
         self.assertIs(start.client, client)
         self.assertEqual(start.provider, "deepseek")

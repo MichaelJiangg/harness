@@ -525,14 +525,14 @@ class MCPManager:
 
 
 def load_server_configs(workspace=None):
-    """优先读取工作区 .harness/mcp.json，否则回退到 pyproject.toml。"""
+    """优先兼容 .harness/mcp.json，否则从统一配置读取。"""
     root = Path.cwd() if workspace is None else Path(workspace)
     path = root / ".harness" / "mcp.json"
     if path.exists():
         return _load_json_configs(path), ".harness/mcp.json"
     settings = get_settings()["mcp"]
     configs = [_config_from_toml(item) for item in settings["servers"]]
-    return configs, "pyproject.toml"
+    return configs, ".harness/config.toml"
 
 
 def _load_json_configs(path):

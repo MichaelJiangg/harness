@@ -132,7 +132,9 @@ class ConfigTests(unittest.TestCase):
                     with patch("harness.app.run_cli") as run_cli:
                         self.assertEqual(entrypoint.main(), 0)
         select.assert_called_once_with()
-        client.assert_called_once_with("test-value", provider="deepseek")
+        client.assert_called_once_with(
+            "test-value", provider="deepseek", model="deepseek-flash",
+        )
         run_cli.assert_called_once_with(
             client.return_value,
             ledger=None,

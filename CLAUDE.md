@@ -9,10 +9,10 @@
 ## 技术与目录约定
 
 - 使用 Python 3.11 或更新版本；查询循环、文件与命令工具、记忆和笔记核心使用标准库，终端渲染依赖 `rich>=13.0`。
-- `pyproject.toml` 是项目元信息及非密钥运行配置的唯一默认值来源，涵盖模型、显示、请求与重试、上下文、工具限制、费用与权限。`harness/config.py` 严格校验并缓存启动配置，文件位置固定在 Harness 项目根目录，不跟随被操作的工作目录；配置缺失或无效时明确报错，不静默放宽权限。密钥继续由 `.env` 或环境变量提供。
-- `tool.harness.model` 定义 DeepSeek 默认配置，`tool.harness.glm` 定义 GLM 配置。`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`；默认 `auto` 在 `GLM_API_KEY` 非空时优先 GLM，否则回退 DeepSeek，两个密钥都没有时启动报错。
+- `pyproject.toml` 只保存项目元信息、依赖和仓库地址。Harness 运行配置来自内置默认值、`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，最终按 `CLI > 环境变量 > 配置文件 > 默认值` 解析；`harness/config.py` 严格校验并缓存启动快照，配置缺失时使用默认值，配置错误时停止启动。
+- `config.toml` 的 `[model]` 定义 DeepSeek 默认配置，`[glm]` 定义 GLM 配置。`HARNESS_PROVIDER`／`--provider` 支持 `auto`／`deepseek`／`glm`；默认 `auto` 在 `GLM_API_KEY` 非空时优先 GLM，否则回退 DeepSeek，两个密钥都没有时启动报错。
 - `harness/app.py` 是唯一组装入口，只负责 `get_settings()`、provider 选择和 `ChatCompletionClient` 创建，并返回 `start()`。工具权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染继续由 `run_cli` 在既有生命周期中连接；组装层不得复制这些初始化逻辑。
-- `harness/permissions.py` 统一执行 `allow`、`ask`、`deny` 决策。`PermissionRule` 提供精确工具名、`action`、整数 `priority`（默认 0），以及可选 `directory` 或 `command_pattern`；配置放在 `tool.harness.permissions.rules`。工具级 `deny` 先拒绝，规则列表按禁止规则优先、数值优先级降序、同级声明顺序排列；`check_permission` 逐条匹配，第一条命中即返回，没有命中则沿用工具级配置及风险等级默认策略。未配置的新工具默认询问。
+- `harness/permissions.py` 统一执行 `allow`、`ask`、`deny` 决策。`PermissionRule` 提供精确工具名、`action`、整数 `priority`（默认 0），以及可选 `directory` 或 `command_pattern`；配置放在 `[permissions.rules]`。工具级 `deny` 先拒绝，规则列表按禁止规则优先、数值优先级降序、同级声明顺序排列；`check_permission` 逐条匹配，第一条命中即返回，没有命中则沿用工具级配置及风险等级默认策略。未配置的新工具默认询问。
 - `PermissionPolicy` 增加会话模式 `ask`／`auto` 和 `auto_directories`。`auto` 模式信任当前工作目录或指定相对目录，自动放行读取、写入、验证、常见 Node/Python/Perl 脚本，以及安全的管道、`2>&1`、`2>/dev/null`、`$(pwd)` 和 heredoc 脚本；`deny` 始终优先，网络、破坏性命令、进程管理、敏感路径、越界和任意重定向仍须确认。
 - 目录规则仅用于单文件操作 `read_file`、`write_file`，以启动工作目录为根，支持目录及全部子目录；配置目录必须是无 `..` 的相对路径。放行要求标准化路径与解析软链接后的实际路径都在指定目录内，询问／禁止同时比较候选路径及配置目录各自的词法和实际路径，任一组合命中即生效，避免别名绕过限制；按路径组件判断，匹配异常不得放行。`grep` 仅支持工具级规则，不将搜索起点检查冒充搜索结果目录隔离。命令规则仅用于 `bash`，用正则搜索完整命令原文，启动时验证正则，不宣称能够识别任意 Shell 等价写法或替代沙箱。
 - 默认读文件与搜索放行，写文件询问；Bash 根据启发式风险兜底，仅明确识别的简单只读命令可放行，其他命令至少询问。工具名 `allow` 不能免除写入或危险 Bash 确认；目录规则和已确认的会话目录可授权写入。Bash 不接受强制 `allow` 规则，工具名 `ask` 可强制所有命令询问；禁止始终优先。规则启动时加载为不可变快照，默认 `rules = []`，示例只在文档中提供，配置错误停止启动。
@@ -48,11 +48,11 @@
 - 记忆注入固定顺序为项目笔记、最近会话、冷记忆；总量按字符上限裁剪，冷记忆先裁，其次是最旧会话，项目笔记不裁剪。
 - `harness/hooks.py` 从 `.harness/hooks.json` 加载生命周期 Hooks，事件包括会话开始／结束、发送消息前后和工具执行前后；支持 shell、prompt、python，工具事件对主查询和子 Agent 统一生效。
 - `harness/skills.py` 从 `.harness/skills/*.json` 加载技能包，`/skill` 查看、激活和停用；激活后只向当前查询开放技能声明的工具，并注入技能提示词。
-- `harness/presets.py` 提供默认启用的项目约定、写后格式化和会话记忆预置钩子；开关位于 `tool.harness.presets`，格式化优先使用 ruff/black 和本地 prettier。
-- `harness/mcp.py` 统一加载 `.harness/mcp.json`，文件存在时优先于 `pyproject.toml` 回退列表；JSON 按服务器名称声明 `command`、`args` 和 `env`，最多 50 台，格式错误停止启动。CLI 在后台启动连接，提示符立即出现；首个提问最多等待 3 秒完成首次连接并刷新工具，超时先用内置工具。通过 stdio 使用 JSON-RPC 2.0 完成 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`，把工具注册为符合模型工具名规则的 `mcp_<server>_<tool>` 并合并进当前查询。单个服务器最多 200 个工具，请求默认超时 120 秒；启动或列表失败只跳过该服务器，退出时关闭全部子进程。
+- `harness/presets.py` 提供默认启用的项目约定、写后格式化和会话记忆预置钩子；开关位于 `[presets]`，格式化优先使用 ruff/black 和本地 prettier。
+- `harness/mcp.py` 优先兼容 `.harness/mcp.json`，未提供时从统一配置 `[mcp.servers]` 读取；JSON 按服务器名称声明 `command`、`args` 和 `env`，最多 50 台，格式错误停止启动。CLI 在后台启动连接，提示符立即出现；首个提问最多等待 3 秒完成首次连接并刷新工具，超时先用内置工具。通过 stdio 使用 JSON-RPC 2.0 完成 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`，把工具注册为符合模型工具名规则的 `mcp_<server>_<tool>` 并合并进当前查询。单个服务器最多 200 个工具，请求默认超时 120 秒；启动或列表失败只跳过该服务器，退出时关闭全部子进程。
 - MCP 管理器维护每台服务器的连接状态、工具数量、运行时间、错误和重试次数；每台服务器有独立后台监控线程，异常退出后自动指数退避重连并重新发现工具。`/mcp` 查看状态，不调用模型。重连成功会在空闲时刷新当前执行器和模型工具列表。
 - MCP 子进程默认不继承 DeepSeek/GLM/Tavily 密钥和动态加载器环境；配置 `env` 的 `${VARIABLE}` 引用从进程环境或项目 `.env` 解析，缺失或为空时不启动该服务器。外部工具默认中风险询问并可用完整工具名配置 `allow`／`ask`／`deny`，但服务器不受文件工具工作区限制。
-- 无本地 JSON 配置时的默认 MCP 服务器为 `tavily`，使用 `npx -y tavily-mcp@0.2.22` 并通过 `${TAVILY_API_KEY}` 注入 `.env` 密钥；真实密钥不得写入 `.harness/mcp.json`、`pyproject.toml`、日志或 Git。
+- 无本地 JSON 配置时的默认 MCP 服务器为 `tavily`，使用 `npx -y tavily-mcp@0.2.22` 并通过 `${TAVILY_API_KEY}` 注入 `.env` 密钥；真实密钥不得写入 `.harness/mcp.json`、`.harness/config.toml`、日志或 Git。
 - `harness/tools/executor.py` 的 `create_tool_executor` 接受可选 `extra_tools` 扩展列表，用于在不绕过默认注册表快照和权限守卫的情况下追加 MCP 工具；外部工具保留服务器声明的 JSON Schema 供模型参考，同时关闭本地 JSON Schema 子集校验，参数错误由 MCP 服务器回传。
 - 记忆默认只在 `python3 -m harness` 的 CLI 启动入口启用，`run_cli` 嵌入调用默认保持关闭，避免测试或第三方嵌入在退出时产生意外的模型请求。
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
@@ -72,7 +72,7 @@
 
 ## 实现要求
 
-- 以下运行数值为 `pyproject.toml` 的初始默认值；后续配置修改必须同时作用于实际执行和工具说明／参数范围，不能只改显示。配置中的字段、类型、有限数值、上下界及互相关系须验证；API key 不得配置到 TOML。配置加载一次，同一进程内修改文件不改变当前权限。
+- 以下运行数值为内置默认值；`.harness/config.toml`、环境变量和 CLI 覆盖后必须同时作用于实际执行和工具说明／参数范围，不能只改显示。配置中的字段、类型、有限数值、上下界及互相关系须验证；API key 不得配置到 TOML。配置加载一次，同一进程内修改文件不改变当前权限。
 - 权限判断在参数校验后、确认和工具执行前完成；`deny` 返回 `permission_denied`，不得询问后放行；`ask` 保留逐次确认、取消、参数快照及无确认入口拒绝规则。CLI 对读写／Bash 以外需要确认的工具展示工具名和参数 JSON，支持新工具默认询问。
 - 工具执行前、最后一次审计落盘后复核权限决策和单文件实际目标，避免等待确认或日志写入时路径变化后落入禁止目录；命中禁止或检查异常时拒绝，其他决策或目标变化要求重新发起调用，不沿用旧批准。此检查不提供抵御并发文件系统改写的原子沙箱保证。
 - 目录放行按路径拼写精确匹配，不扩大授权；目录询问／禁止以 Unicode NFC 规范化并折叠大小写的路径保守匹配，覆盖 macOS 大小写及 Unicode 等价别名，也覆盖尚未创建的目录。在区分大小写的文件系统中，询问／禁止会同时限制仅大小写或 Unicode 规范形式不同的目录。

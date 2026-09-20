@@ -2,12 +2,13 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `tool.harness.mcp`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。V0.9.3 新增本地命令自动发现和终端多行输入：命令处理器按文件注册，`/help` 动态生成；空闲时回车换行、连续两个空行发送，续行显示行号并保留粘贴内容中的内部空行。V0.9.3.1 修复 Esc 中断、readline 行内编辑、单行立即发送与多行识别，并保护输入提示符。第十部分组装与发布已作为 V0.10.1 发布：`harness/app.py` 提供唯一 `create_app()` 组装入口，把启动配置、模型客户端和完整生命周期统一接入。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `.harness/config.toml`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。V0.9.3 新增本地命令自动发现和终端多行输入：命令处理器按文件注册，`/help` 动态生成；空闲时回车换行、连续两个空行发送，续行显示行号并保留粘贴内容中的内部空行。V0.9.3.1 修复 Esc 中断、readline 行内编辑、单行立即发送与多行识别，并保护输入提示符。第十部分组装与发布已作为 V0.10.1 发布：`harness/app.py` 提供唯一 `create_app()` 组装入口，把启动配置、模型客户端和完整生命周期统一接入。V0.10.2 完成统一配置管理：`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数按 `CLI > 环境变量 > 配置文件 > 默认值` 覆盖内置默认值，`pyproject.toml` 只保留项目元数据。Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.10.1 — Add-连接所有模块](https://github.com/MichaelJiangg/harness/releases/tag/v0.10.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.10.1`。
+最近公开版本为 [V0.10.2 — Add-统一配置管理](https://github.com/MichaelJiangg/harness/releases/tag/v0.10.2) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.10.2`。
 
 ## 已完成
 
+- 完成统一配置管理：运行时配置迁出 `pyproject.toml`，支持 `.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，按 `CLI > 环境变量 > 配置文件 > 默认值` 解析；新增 `engine.max_turns`、上下文窗口、工具超时和 MCP 列表覆盖。全量 596 项离线测试通过。
 - 完成第十部分组装入口：新增 `harness/app.py`，`create_app()` 加载配置、选择 provider、创建客户端并返回唯一 `start()`；`start()` 统一启用权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染。全量 620 项离线测试通过。
 - 完成模型运行期间的 Esc 中断：真实交互终端在 busy 输入时临时进入 cbreak，Esc 设置取消信号并唤醒待确认工具，中断后会创建新的取消事件和执行器；cbreak 读取会轮询 worker 状态，任务结束后立即退出并切回 readline，后续问答可继续。管道和测试输入不受影响。全量 615 项离线测试通过。
 - 完成终端多行输入：空闲时回车换行，连续两个空行发送；续行前显示行号，粘贴多行内容保留内部空行，模型运行期间确认和本地命令保持单行即时响应，管道协议不变。全量 605 项离线测试通过。
@@ -149,6 +150,7 @@
 
 ## 最近验证
 
+- 2026-09-20：统一配置管理完成后全量 596 项离线测试通过，覆盖无配置默认启动、partial config.toml 合并、CLI/环境变量/文件优先级、MCP 列表覆盖、无效配置脱敏、CLI 参数解析、运行时集成和 `max_turns` 上限；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.10.1 已发布。远端 `main` 提交为 `be948846405566b41e913aa76008a7916f8e8e74`，注解标签对象为 `50b01daab0c922bb63d565cae5a1453bbd5ff616`，标签 `v0.10.1` 指向该提交；Release「V0.10.1 - Add-连接所有模块」为正式版、非草稿并作为 Latest。
 - 2026-09-20：组装入口完成后全量 620 项离线测试通过，覆盖 `create_app()` 返回唯一可调用入口、默认 provider 与客户端组装、注入客户端跳过密钥加载、`run_cli` 全部生命周期开关，以及 `python -m harness` 使用新入口；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.3.1 已发布。远端 `main` 提交为 `648abb6eb7f67f8a4602fd240b9da65fd4119fd6`，注解标签对象为 `3769040821140279b36f6a0fd964fb40fbfadd2f`，标签 `v0.9.3.1` 指向该提交；Release「V0.9.3.1 - bugfix」为正式版、非草稿并作为 Latest。

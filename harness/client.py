@@ -25,12 +25,12 @@ class APIError(RuntimeError):
 
 
 class ChatCompletionClient:
-    def __init__(self, api_key, *, opener=urlopen, timeout=None, provider="deepseek"):
+    def __init__(self, api_key, *, opener=urlopen, timeout=None, provider="deepseek", model=None):
         if provider not in {"deepseek", "glm"}:
             raise ValueError("provider 只支持 deepseek 或 glm。")
         provider_settings = _MODEL if provider == "deepseek" else _GLM
         self.provider = provider
-        self.model = provider_settings["name"]
+        self.model = provider_settings["name"] if model is None else model
         self.endpoint = provider_settings["endpoint"]
         self.label = "DeepSeek" if provider == "deepseek" else "GLM"
         self.api_key_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "GLM_API_KEY"

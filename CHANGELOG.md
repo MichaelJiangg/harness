@@ -1,5 +1,14 @@
 # 版本记录
 
+## V0.10.2 — Add-统一配置管理
+
+Git 标签：`v0.10.2`。
+
+- 运行时配置从 `pyproject.toml` 的 `tool.harness` 迁移到统一配置：支持 `.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，优先级为 CLI > 环境变量 > 配置文件 > 内置默认值。
+- 新增 `--config`、`--provider`、`--model`、`--max-turns`、`--context-window`、`--tool-timeout`、`--mcp-server` 和 `--show-config`；缺少配置文件时使用内置默认值正常启动。
+- 新增 `engine.max_turns`，模型名称、上下文字符窗口、工具超时和 MCP 列表可分层覆盖；`.harness/mcp.json` 作为兼容层优先读取。
+- `pyproject.toml` 现在只保留项目元信息、Python 版本和依赖。
+
 ## V0.10.1 — Add-连接所有模块
 
 Git 标签：`v0.10.1`。

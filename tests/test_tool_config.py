@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -20,21 +19,26 @@ class ToolConfigTests(unittest.TestCase):
         self.project = Path(self.directory.name) / "project"
         shutil.copytree(PROJECT_ROOT / "harness", self.project / "harness",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        self.configuration = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    def write_runtime_config(self, changes):
+        lines = []
+        for section, values in changes.items():
+            if "." in section:
+                table, _, name = section.partition(".")
+                lines.append(f"[{table}.{name}]")
+            else:
+                lines.append(f"[{section}]")
+            for name, value in values.items():
+                lines.append(f"{name} = {value}")
+        path = self.project / ".harness" / "config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def run_tools(self, changes, script):
-        configuration = self.configuration
-        for section, values in changes.items():
-            prefix, separator, rest = configuration.partition(f"[tool.harness.{section}]\n")
-            self.assertTrue(separator)
-            table, next_table, suffix = rest.partition("\n[")
-            for name, value in values.items():
-                table, count = re.subn(rf"(?m)^{re.escape(name)}\s*=.*$", f"{name} = {value}", table)
-                self.assertEqual(count, 1)
-            configuration = prefix + separator + table + next_table + suffix
-        (self.project / "pyproject.toml").write_text(configuration, encoding="utf-8")
+        self.write_runtime_config(changes)
         environment = os.environ.copy()
         environment.pop("DEEPSEEK_API_KEY", None)
+        environment.pop("GLM_API_KEY", None)
         prelude = """
 from pathlib import Path
 import json

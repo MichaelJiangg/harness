@@ -70,7 +70,7 @@ def _format_command_help():
     return "\n".join(lines)
 
 
-HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工具权限由 pyproject.toml 配置。
+HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工具权限由 .harness/config.toml 配置。
 默认低风险读取和已识别的只读命令直接放行，中风险操作确认，破坏性命令醒目警告后确认。
 权限规则按禁止优先、数值优先级匹配，首条命中生效；目录授权可免除写入确认。
 写入确认会展示本会话授权目录，批准且写入成功后，同目录及子目录不再询问；重启失效。
@@ -84,6 +84,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 读文件按页返回，全文分析可按下一页游标继续；旧工具批次过长时生成阶段摘要。
 交互终端输入：单行直接回车发送；行尾 \\ 续行或粘贴多行时回车换行、连续两个空行发送。模型执行期间的确认与本地命令仍为单行即时响应。
 模型回答或工具执行期间按 Esc 中断。
+启动参数：--config PATH --provider auto|deepseek|glm --model NAME --max-turns N --context-window N --tool-timeout N --mcp-server NAME=COMMAND --show-config
 
 {_format_command_help()}"""
 
@@ -138,7 +139,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     mcp_initial_ready = None
     mcp_errors = []
     mcp_definitions = []
-    mcp_config_source = "pyproject.toml"
+    mcp_config_source = ".harness/config.toml"
     mcp_change_event = Event()
     if mcp_enabled:
         configs, mcp_config_source = load_server_configs()
@@ -243,6 +244,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     abort = Event()
     background_manager = BackgroundManager(**get_settings()["background"])
     background_default_timeout = get_settings()["background"]["default_timeout"]
+    max_turns = get_settings()["engine"]["max_turns"]
     security_settings = get_settings()["security"]
     permission_mode = security_settings["mode"]
     auto_directories = list(security_settings["auto_directories"])
@@ -1516,6 +1518,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if hook_result.prompts:
                     text = text + "\n\n## 发送前钩子\n" + "\n".join(hook_result.prompts)
                 inject_memory_for_query(text)
+                if turn + 1 > max_turns:
+                    write(f"已达到 {max_turns} 轮对话上限，请开新会话继续。")
+                    continue
                 turn += 1
                 query_tools = available_tool_definitions
                 if active_skill is not None:

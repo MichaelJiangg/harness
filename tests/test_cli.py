@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 from harness.cli import BRIEF_HELP, HELP, PRODUCT_NAME, PRODUCT_SUBTITLE, run_cli
 from harness.client import DEFAULT_MODEL
 from harness.commands import command_entries
+from harness.config import get_settings
 from harness.engine import query_loop
 from harness.tools import create_tool_executor
 from harness.usage import UsageLedger
@@ -282,6 +283,20 @@ class CLITests(unittest.TestCase):
         self.assertIn("bash", text)
         client.complete.assert_not_called()
         self.assertEqual(errors.getvalue(), "")
+
+    def test_max_turns_stops_additional_questions(self):
+        settings = deepcopy(get_settings())
+        settings["engine"]["max_turns"] = 1
+        client = Mock(complete=Mock(side_effect=[reply("第一次回答")]))
+        output = StringIO()
+        with patch("harness.cli.get_settings", return_value=settings):
+            run_cli(
+                client,
+                input_stream=StringIO("第一个问题\n第二个问题\n/exit\n"),
+                output=output,
+            )
+        client.complete.assert_called_once()
+        self.assertIn("1 轮对话上限", output.getvalue())
 
     def test_mode_command_switches_auto_and_rejects_invalid_value(self):
         output = StringIO()

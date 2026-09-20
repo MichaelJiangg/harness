@@ -1,6 +1,6 @@
 [project]
 name = "harness"
-version = "0.10.1"
+version = "0.10.2"
 description = "A Python query engine with DeepSeek/GLM and a local tool system."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,99 +8,3 @@ dependencies = ["rich>=13.0"]
 
 [project.urls]
 Repository = "https://github.com/MichaelJiangg/harness"
-
-[tool.harness.model]
-name = "deepseek-flash"
-endpoint = "https://api.deepseek.com/chat/completions"
-request_timeout = 120
-
-[tool.harness.glm]
-name = "glm-5.3-flash"
-endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-request_timeout = 120
-reasoning_effort = "low"
-
-[tool.harness.glm.pricing]
-input_hit_per_million = 0.0
-input_miss_per_million = 0.0
-output_per_million = 0.0
-currency = "CNY"
-source = "https://docs.bigmodel.cn/llms-full.txt"
-checked_at = "2026-09-20"
-
-[tool.harness.display]
-character_delay = 0.02
-
-[tool.harness.engine]
-max_requests = 20
-max_retries = 3
-retry_initial_delay = 1.0
-retry_backoff = 2.0
-
-[tool.harness.background]
-max_concurrent = 5
-default_timeout = 300
-
-[tool.harness.security]
-mode = "ask"
-auto_directories = []
-
-[tool.harness.swarm]
-max_requests = 120
-max_role_requests = 40
-
-[tool.harness.presets]
-project_conventions = true
-auto_format = true
-session_memory = true
-
-[tool.harness.mcp]
-enabled = true
-servers = [
-    { name = "tavily", command = "npx", args = ["-y", "tavily-mcp@0.2.22"], env = ["TAVILY_API_KEY=${TAVILY_API_KEY}"] },
-]
-
-[tool.harness.context]
-max_chars = 64000
-summary_chars = 2000
-keep_recent_turns = 4
-max_compactions = 6
-tool_result_chars = 12000
-
-[tool.harness.tools]
-file_max_bytes = 1048576
-
-[tool.harness.tools.read_file]
-page_lines = 200
-
-[tool.harness.tools.bash]
-default_timeout = 30
-max_timeout = 120
-max_output_bytes = 65536
-
-[tool.harness.tools.grep]
-default_max_results = 100
-max_results = 500
-max_line_chars = 500
-max_result_chars = 5500
-
-[tool.harness.pricing]
-input_hit_per_million = 0.003
-input_miss_per_million = 0.15
-output_per_million = 0.6
-currency = "USD"
-source = "https://api-docs.deepseek.com/quick_start/pricing"
-checked_at = "2026-09-18"
-peak_weekdays = [0, 1, 2, 3, 4]
-peak_hours_utc = [[1, 4], [6, 10]]
-
-[tool.harness.pricing.peak]
-input_hit_per_million = 0.006
-input_miss_per_million = 0.30
-output_per_million = 1.2
-
-[tool.harness.permissions]
-allow = ["read_file", "grep", "delegate", "notes_append"]
-ask = ["write_file", "notes_replace", "web_fetch", "web_search"]
-deny = []
-rules = []

@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.10.1 — Add-连接所有模块**（Git 标签 `v0.10.1`）。新增 `harness/app.py` 统一组装入口。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.10.2 — Add-统一配置管理**（Git 标签 `v0.10.2`）。支持 `.harness/config.toml`、环境变量和 CLI 分层覆盖。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -215,10 +215,10 @@ Shell Hook 的环境会清除 DeepSeek/GLM/Tavily 密钥，并注入 `HARNESS_EV
 
 ## 预置钩子
 
-默认启用以下内置钩子，可在 `pyproject.toml` 中关闭：
+默认启用以下内置钩子，可在 `.harness/config.toml` 中关闭：
 
 ```toml
-[tool.harness.presets]
+[presets]
 project_conventions = true
 auto_format = true
 session_memory = true
@@ -251,7 +251,7 @@ Harness 可以通过标准输入输出连接外部 Model Context Protocol 工具
 }
 ```
 
-`.harness/mcp.json` 存在时优先于 `pyproject.toml` 的 `tool.harness.mcp.servers`；`pyproject.toml` 继续作为没有本地 JSON 配置时的回退。`.harness/` 已被 Git 排除，因此数据库地址、本机路径和不同项目的服务器配置不会进入仓库。
+`.harness/mcp.json` 作为兼容层优先读取；未提供时使用 `.harness/config.toml` 的 `[mcp]` 或内置默认值。`.harness/` 已被 Git 排除，因此数据库地址、本机路径和不同项目的服务器配置不会进入仓库。
 
 启动时会读取配置，并在后台依次连接服务器、发送 `initialize` 和 `tools/list`，因此提示符不需要等待外部 MCP 进程启动。首个提问会最多等待 3 秒完成首次连接并刷新工具列表，超时则先用内置工具继续；连接成功后把外部工具注册为 `mcp_<server>_<tool>`。冒号等模型工具名不接受的字符会替换为下划线。
 
@@ -278,38 +278,56 @@ MCP 的 `env` 对象支持 `${VARIABLE}` 引用。Harness 优先读取当前进�
 外部工具默认按中风险询问确认。可以使用完整名称配置权限：
 
 ```toml
-[tool.harness.permissions]
+[permissions]
 allow = ["read_file", "mcp_tavily_tavily_search"]
 deny = ["mcp_tavily_tavily_crawl"]
 ```
 
-每个配置文件最多声明 50 台服务器，每台最多发现 200 个工具，单个请求默认超时 120 秒；服务器失败会记录错误并继续加载其他服务器，退出时会关闭全部子进程。MCP 子进程默认不继承 Harness 的 DeepSeek/GLM/Tavily 密钥，配置中显式声明或通过 `${VARIABLE}` 引用的环境变量仍可注入。工具服务器仍以当前用户权限运行，也不受文件工具的工作区限制，应只配置可信服务器。不要把真实密钥直接写进 `.harness/mcp.json` 或 `pyproject.toml`。
+每个配置文件最多声明 50 台服务器，每台最多发现 200 个工具，单个请求默认超时 120 秒；服务器失败会记录错误并继续加载其他服务器，退出时会关闭全部子进程。MCP 子进程默认不继承 Harness 的 DeepSeek/GLM/Tavily 密钥，配置中显式声明或通过 `${VARIABLE}` 引用的环境变量仍可注入。工具服务器仍以当前用户权限运行，也不受文件工具的工作区限制，应只配置可信服务器。不要把真实密钥直接写进 `.harness/mcp.json` 或 `.harness/config.toml`。
 
 `python3 -m harness` 默认启用 MCP 配置；直接调用 `run_cli` 的嵌入场景默认关闭。外部工具使用服务器声明的 JSON Schema 展示给模型，本地执行器不会套用内置工具的子集校验，参数合法性由 MCP 服务器自行处理。
 
 ## 项目配置
 
-项目根目录的 `pyproject.toml` 集中管理元信息及非密钥默认配置。启动时通过 Python 标准库 `tomllib` 读取、验证并保存快照，修改配置后重启生效。配置文件位置固定在 Harness 源码根目录，不会从所操作的其他目录加载同名文件；当前仍使用 `python3 -m harness` 从源码运行。
+项目根目录的 `.harness/config.toml` 管理非密钥运行配置，文件不存在时直接使用内置默认值。启动时按以下优先级解析、验证并保存快照，修改配置后重启生效：
+
+```text
+CLI 参数 > 环境变量 > .harness/config.toml > 内置默认值
+```
+
+API key 继续放在 `.env` 或环境变量中，不进入 TOML。可用 `--show-config` 查看最终配置，不输出密钥。
+
+```toml
+# .harness/config.toml
+[model]
+name = "deepseek-flash"
+
+[engine]
+max_turns = 100
+context_window = 64000
+
+[tools]
+timeout = 30
+
+[mcp]
+enabled = true
+servers = [
+  { name = "tavily", command = "npx", args = ["-y", "tavily-mcp@0.2.22"] },
+]
+```
 
 | 配置位置 | 内容 |
 | --- | --- |
-| `[project]` | 项目名称、版本、描述、Python 版本与依赖 |
-| `[tool.harness.model]` | 模型名称、HTTPS 接口地址、请求超时 |
-| `[tool.harness.display]` | 逐字显示间隔，`character_delay = 0.02` 表示 20 毫秒 |
-| `[tool.harness.engine]` | 请求上限、重试次数、首次等待与递增倍数 |
-| `[tool.harness.background]` | 后台任务并发上限与默认超时 |
-| `[tool.harness.security]` | 默认权限模式与 auto 模式信任目录 |
-| `[tool.harness.swarm]` | Swarm 团队总请求上限与单角色请求上限 |
-| `[tool.harness.presets]` | 项目约定、写后格式化、会话记忆三个预置钩子的开关 |
-| `[tool.harness.mcp]` | MCP 开关与无 `.harness/mcp.json` 时的回退服务器列表 |
-| `[tool.harness.context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
-| `[tool.harness.tools]` 及其 `bash`、`grep` 子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
-| `[tool.harness.pricing]` 及其 `peak` 子表 | 现有费率、币种、核验信息及 UTC 高峰时段 |
-| `[tool.harness.permissions]` | 工具的放行、询问和拒绝规则 |
+| `[model]` | 模型名称、HTTPS 接口地址、请求超时 |
+| `[engine]` | 最大对话轮数、请求上限、重试次数、首次等待与递增倍数 |
+| `[context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
+| `[tools]` 及 `[tools.bash]`、`[tools.grep]` 等子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
+| `[mcp]` | MCP 开关与服务器列表 |
+| `[permissions]` | 工具的放行、询问和拒绝规则 |
 
-运行配置在 `tool.harness` 下要求完整字段，不接受未知键、无效类型或超出对应范围的数值；默认值必须符合对应上限。搜索结果预算必须比总工具预算至少少 500 字符，且至少为单行字符限制的 6 倍加 400 字符，为 JSON 转义和结果字段留出空间。命令每路输出预算最少 128 字节，足以容纳首尾片段与截断提示。配置不存在或错误时停止启动并显示字段说明，不回退到更宽松的权限。
+配置文件可以只写需要覆盖的字段，最终快照仍按完整 Schema 校验，不接受未知键、无效类型或超出对应范围的数值；默认值必须符合对应上限。搜索结果预算必须比总工具预算至少少 500 字符，且至少为单行字符限制的 6 倍加 400 字符，为 JSON 转义和结果字段留出空间。命令每路输出预算最少 128 字节，足以容纳首尾片段与截断提示。配置错误时停止启动并显示字段说明，不回退到更宽松的权限。
 
-API key 继续放在 `.env` 或环境变量中，不能迁入 `pyproject.toml`。`CLAUDE.md` 保留开发规范，`ROADMAP.md` 保留进度。下文数值均为配置文件的初始默认值，修改后会同时更新实际执行、工具参数约束和相应说明。
+`CLAUDE.md` 保留开发规范，`ROADMAP.md` 保留进度。下文数值均为内置默认值，修改后会同时更新实际执行、工具参数约束和相应说明。
 
 ## 权限检查
 
@@ -326,7 +344,7 @@ API key 继续放在 `.env` 或环境变量中，不能迁入 `pyproject.toml`�
 高风险警告使用文字与醒目边框，不依赖终端颜色；高风险分类本身要求确认，不等同于永久禁止。必须永远拒绝的操作应配置 `deny` 规则。需要确认的 Bash 调用逐次询问，不记忆命令授权。
 
 ```toml
-[tool.harness.permissions]
+[permissions]
 allow = ["read_file", "grep", "delegate", "notes_append"]
 ask = ["write_file", "notes_replace", "web_fetch", "web_search"]
 deny = []
@@ -375,14 +393,14 @@ auto 模式不覆盖 `deny`，也不放行网络下载、`rm`、进程管理、�
 项目默认 `rules = []`，不预先启用目录放行。启用以下示例时，删除空的 `rules = []`，在 TOML 中增加这两段数组表；不能同时保留同名空数组和数组表：
 
 ```toml
-[[tool.harness.permissions.rules]]
+[[permissions.rules]]
 name = "allow-tests-writes"
 tool = "write_file"
 action = "allow"
 directory = "tests"
 priority = 100
 
-[[tool.harness.permissions.rules]]
+[[permissions.rules]]
 name = "deny-recursive-force-remove"
 tool = "bash"
 action = "deny"
@@ -659,9 +677,9 @@ DeepSeek 的 `deepseek-flash` 费率于 2026-09-18 核验，单位为 USD／百�
 
 峰段为周一至周五 UTC 01:00–04:00、06:00–10:00（北京时间 09:00–12:00、14:00–18:00），其余时间为谷段。按响应 `created` 的 UTC 时间估算；该字段缺失时使用本机记录时刻。官方没有明确跨时段请求的定价时点，因此此金额为预估值，实际扣费以 DeepSeek 账单为准。人民币账单有独立价表，不应直接把这里的 USD 数字当作人民币。
 
-GLM 的 `glm-5.3-flash` 目前配置在 `pyproject.toml` 的 `tool.harness.glm.pricing` 中，费率为 `0.0 CNY` 占位值。GLM 返回的缓存命中字段 `prompt_tokens_details.cached_tokens` 会归一化为既有账本使用的 `prompt_cache_hit_tokens`／`prompt_cache_miss_tokens`，因此 token 统计正常，但费用仍按 `0` 估算，直到补入官方价格。
+GLM 的 `glm-5.3-flash` 目前在内置默认配置的 `glm.pricing` 中，费率为 `0.0 CNY` 占位值。GLM 返回的缓存命中字段 `prompt_tokens_details.cached_tokens` 会归一化为既有账本使用的 `prompt_cache_hit_tokens`／`prompt_cache_miss_tokens`，因此 token 统计正常，但费用仍按 `0` 估算，直到补入官方价格。
 
-费率及 UTC 时段保存在 `pyproject.toml` 的 `tool.harness.pricing` 中，不自动联网刷新。`peak_weekdays` 使用周一为 `0`、周日为 `6` 的编号；`peak_hours_utc` 使用左闭右开的小时区间。官方费率变化时需更新配置和核验信息。本次仅迁移现有数值，未重新核价；统计只保存在当前进程内存中，退出后清空，不代表账户全部历史消费。
+费率及 UTC 时段保存在统一配置的 `pricing` 中，不自动联网刷新。`peak_weekdays` 使用周一为 `0`、周日为 `6` 的编号；`peak_hours_utc` 使用左闭右开的小时区间。官方费率变化时需更新配置和核验信息。本次仅迁移现有数值，未重新核价；统计只保存在当前进程内存中，退出后清空，不代表账户全部历史消费。
 
 如果缓存明细缺失或不一致，按全部输入未命中缓存保守估算并标注；`usage` 缺失或非法、连接失败时，不会虚构零费用，会标记用量未知。汇总此时只代表已知小计，请以账单核对未知请求。
 
@@ -671,7 +689,7 @@ GLM 的 `glm-5.3-flash` 目前配置在 `pyproject.toml` 的 `tool.harness.glm.p
 
 | 文件 | 职责 |
 | --- | --- |
-| `pyproject.toml` | 项目元信息和非密钥运行默认配置 |
+| `pyproject.toml` | 项目元信息、Python 版本、依赖和仓库地址 |
 | `harness/__main__.py` | 读取配置并启动程序 |
 | `harness/app.py` | 组装配置、模型客户端和完整 CLI 生命周期，暴露 `create_app` |
 | `harness/config.py` | 校验并缓存 TOML 配置；密钥优先读环境变量，再读取 `.env` |

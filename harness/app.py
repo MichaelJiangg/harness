@@ -2,10 +2,15 @@
 
 from .cli import run_cli
 from .client import ChatCompletionClient
-from .config import get_settings, select_model_provider
+from .config import (
+    get_settings,
+    load_api_key,
+    load_glm_api_key,
+    select_model_provider,
+)
 
 
-def create_app(*, client=None):
+def create_app(*, client=None, provider=None, model=None):
     """组装系统并返回唯一启动函数。
 
     默认从环境变量或项目 .env 选择 provider 并创建客户端；返回的 start()
@@ -14,8 +19,27 @@ def create_app(*, client=None):
     """
     settings = get_settings()
     if client is None:
-        provider, api_key = select_model_provider()
-        client = ChatCompletionClient(api_key, provider=provider)
+        requested_provider = provider or settings.get("provider", "auto")
+        if requested_provider == "auto":
+            provider, api_key = select_model_provider()
+        else:
+            provider = requested_provider
+            api_key = (
+                load_api_key()
+                if provider == "deepseek"
+                else load_glm_api_key()
+            )
+            if not isinstance(api_key, str) or not api_key.strip():
+                key_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "GLM_API_KEY"
+                raise ValueError(f"未配置 {key_name}，无法使用 provider={provider}。")
+        selected_model = settings["model"]["name"]
+        if provider == "glm" and settings["model"]["name"] == "deepseek-flash":
+            selected_model = settings["glm"]["name"]
+        client = ChatCompletionClient(
+            api_key,
+            provider=provider,
+            model=model or selected_model,
+        )
 
     def start(*, ledger=None, input_stream=None, output=None, error_output=None,
               character_delay=None, memory_store=None, notes_store=None,
