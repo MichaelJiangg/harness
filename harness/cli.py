@@ -89,7 +89,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 {_format_command_help()}"""
 
 PRODUCT_NAME = "Delin Harness"
-PRODUCT_SUBTITLE = "Powered by Codex · v1.0.3"
+PRODUCT_SUBTITLE = "Powered by Codex · v1.0.4"
 BRIEF_HELP = """Try:
 
 1. 帮我调研 Personal Agent 的国内外竞品，包括 MUSE、Today 等。
@@ -233,6 +233,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         ),
     }]
     abort = Event()
+    query_interrupted = False
     background_manager = BackgroundManager(**get_settings()["background"])
     background_default_timeout = get_settings()["background"]["default_timeout"]
     max_turns = get_settings()["engine"]["max_turns"]
@@ -249,6 +250,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     stream_line_open = False
     response_streamed = False
     stream_buffer = ""
+    partial_reply = ""
+    interrupt_rendered = False
     stream_live = None
     tool_started_at = {}
     skip_next_response_start = False
@@ -402,7 +405,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             stream_live = Live(
                 Spinner("dots", text="思考中..."),
                 console=console,
-                vertical_overflow="visible",
+                transient=True,
+                vertical_overflow="crop",
             )
             stream_live.start()
 
@@ -421,23 +425,18 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         response_streamed = True
         with output_lock:
             if stream_live is not None:
-                try:
-                    stream_live.update(
-                        Panel(
-                            Markdown(
-                                _preview_text(stream_buffer, multiline=True),
-                                code_theme="monokai",
-                                justify="left",
-                            ),
-                            title="Assistant",
-                            border_style="cyan",
-                            padding=(0, 1),
+                stream_live.update(
+                    Panel(
+                        Markdown(
+                            _preview_text(stream_buffer, multiline=True),
+                            code_theme="monokai",
+                            justify="left",
                         ),
+                        title="Assistant",
+                        border_style="cyan",
+                        padding=(0, 1),
                     )
-                    stream_live.auto_refresh = False
-                    stream_live.refresh()
-                except Exception:
-                    pass
+                )
 
     def save_memory_summary():
         nonlocal messages
@@ -1126,7 +1125,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         elif event["type"] == "text":
             fragments = event["text"] if terminal else (event["text"],)
             for fragment in fragments:
-                if abort.is_set():
+                if query_interrupted or abort.is_set():
                     return
                 append_stream(fragment)
                 if terminal and character_delay > 0 and abort.wait(character_delay):
@@ -1140,7 +1139,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             )
 
     def run_query(state, *, compact=False):
-        nonlocal messages, response_streamed, skip_next_response_start
+        nonlocal interrupt_rendered, messages, partial_reply, query_interrupted, response_streamed, skip_next_response_start
+        query_interrupted = False
+        interrupt_rendered = False
+        partial_reply = ""
         try:
             if compact:
                 if compact_history(state, force=True) and not abort.is_set():
@@ -1161,20 +1163,46 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                             if tool["function"]["name"] in allowed
                         ]
             answer = query_loop(state)
-            if not abort.is_set():
+            if not query_interrupted and not abort.is_set():
                 messages = state.messages
-                if not response_streamed:
+                if terminal or not response_streamed:
                     write_markdown("Assistant", answer)
                 result = hook_manager.run("after_reply", {"reply": answer})
                 report_hook_result("after_reply", result)
         except QueryAborted:
-            pass
+            if query_interrupted:
+                snapshot = deepcopy(state.messages)
+                if snapshot and not (
+                    snapshot[-1].get("role") == "assistant"
+                    and snapshot[-1].get("tool_calls")
+                ):
+                    interrupted_content = partial_reply or stream_buffer
+                    if interrupted_content:
+                        for message in reversed(snapshot):
+                            if (
+                                message.get("role") == "assistant"
+                                and isinstance(message.get("content"), str)
+                            ):
+                                message["content"] = interrupted_content
+                                break
+                        else:
+                            snapshot.append({
+                                "role": "assistant",
+                                "content": interrupted_content,
+                            })
+                    messages = snapshot
         except Exception as error:
             if not abort.is_set():
                 write(f"错误：{error}", error=True)
         finally:
-            with output_lock:
-                stop_stream_live()
+            if (
+                terminal and response_streamed and stream_buffer
+                and query_interrupted and not interrupt_rendered
+            ):
+                write_markdown("Assistant", stream_buffer)
+            else:
+                with output_lock:
+                    stop_stream_live()
             show_prompt()
 
     def switch_model(target):
@@ -1482,9 +1510,15 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 if interrupted is INTERRUPT:
                     abort.set()
                     cancel_confirmation()
+                    if not query_interrupted:
+                        if terminal and response_streamed and stream_buffer:
+                            partial_reply = stream_buffer
+                            write_markdown("Assistant", stream_buffer)
+                            interrupt_rendered = True
+                        write("\n查询已停止。")
+                    query_interrupted = True
                     abort = Event()
                     tool_executor = build_tool_executor()
-                    write("\n查询已停止。")
                     continue
                 if interrupted is INPUT_EOF:
                     finish_eof()
@@ -1501,6 +1535,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if multiline_input and not text.strip():
                 continue
             if text == "/exit":
+                query_interrupted = True
                 abort.set()
                 cancel_confirmation()
                 if worker:
@@ -1608,6 +1643,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 worker = Thread(target=run_query, args=(state,), daemon=True)
                 worker.start()
     except KeyboardInterrupt:
+        query_interrupted = True
         abort.set()
         cancel_confirmation()
         if worker:

@@ -44,7 +44,7 @@ class DisplayTests(unittest.TestCase):
         self.assertLess(output.getvalue().index("乙"), output.getvalue().index("丙"))
         self.assertIn("Assistant", output.getvalue())
 
-    def test_terminal_shows_spinner_and_tool_progress(self):
+    def test_terminal_shows_tool_progress(self):
         tool_call = {
             "id": "call_read_1", "type": "function", "function": {
                 "name": "read_file", "arguments": json.dumps({"path": "example.txt"}),
@@ -66,7 +66,7 @@ class DisplayTests(unittest.TestCase):
                 self.assertTrue(session.output.wait_for("读取完成。"))
                 session.close()
         output = visible_text(session.output.getvalue())
-        self.assertIn("思考中...", output)
+        self.assertIn("Assistant", output)
         self.assertIn("⚙ 执行工具：read_file", output)
         self.assertIn('"path": "example.txt"', output)
         self.assertIn("✓ 完成", output)
