@@ -16,7 +16,7 @@ IDLE = object()
 def terminal_cbreak(fd):
     original = termios.tcgetattr(fd)
     modified = original[:]
-    modified[3] &= ~(termios.ICANON | termios.IEXTEN)
+    modified[3] &= ~(termios.ICANON | termios.IEXTEN | termios.ECHO)
     termios.tcsetattr(fd, termios.TCSADRAIN, modified)
     try:
         yield
@@ -61,6 +61,12 @@ def read_interruptible_line(fd, output, output_lock, *, should_continue=None):
             output.write("\b \b")
             output.flush()
 
+    def echo(text):
+        if text:
+            with output_lock:
+                output.write(text)
+                output.flush()
+
     while True:
         chunk = read_byte()
         if chunk is IDLE:
@@ -74,6 +80,7 @@ def read_interruptible_line(fd, output, output_lock, *, should_continue=None):
                     return IDLE
                 if lookahead != b"\n":
                     unread(lookahead)
+            echo("\r\n")
             return "".join(characters)
         if chunk in {b"\x08", b"\x7f"}:
             backspace()
@@ -95,6 +102,8 @@ def read_interruptible_line(fd, output, output_lock, *, should_continue=None):
         decoded = decoder.decode(chunk)
         if decoded:
             characters.append(decoded)
+            if decoded.isprintable():
+                echo(decoded)
 
 
 __all__ = ["EOF", "IDLE", "INTERRUPT", "read_interruptible_line", "terminal_cbreak"]

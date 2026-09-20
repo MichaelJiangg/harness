@@ -89,7 +89,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 {_format_command_help()}"""
 
 PRODUCT_NAME = "Delin Harness"
-PRODUCT_SUBTITLE = "Powered by Codex · v1.0.2"
+PRODUCT_SUBTITLE = "Powered by Codex · v1.0.3"
 BRIEF_HELP = """Try:
 
 1. 帮我调研 Personal Agent 的国内外竞品，包括 MUSE、Today 等。
@@ -424,7 +424,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 try:
                     stream_live.update(
                         Panel(
-                            Markdown(stream_buffer, code_theme="monokai", justify="left"),
+                            Markdown(
+                                _preview_text(stream_buffer, multiline=True),
+                                code_theme="monokai",
+                                justify="left",
+                            ),
                             title="Assistant",
                             border_style="cyan",
                             padding=(0, 1),

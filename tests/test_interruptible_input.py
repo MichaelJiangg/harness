@@ -28,8 +28,9 @@ class InterruptibleInputTests(unittest.TestCase):
             return read_interruptible_line(1, output, Lock()), output.getvalue()
 
     def test_text_and_enter_are_decoded_as_one_line(self):
-        value, _ = self.read([b"\xe4", b"\xbd", b"\xa0", b"\xe5", b"\xa5", b"\xbd", b"\r"])
+        value, output = self.read([b"\xe4", b"\xbd", b"\xa0", b"\xe5", b"\xa5", b"\xbd", b"\r"])
         self.assertEqual(value, "你好")
+        self.assertEqual(output, "你好\r\n")
 
     def test_escape_alone_returns_interrupt(self):
         value, _ = self.read([b"\x1b"])
@@ -45,7 +46,7 @@ class InterruptibleInputTests(unittest.TestCase):
     def test_backspace_removes_character_and_repaints(self):
         value, output = self.read([b"\xe7", b"\x94", b"\xb2", b"\x7f", b"\r"])
         self.assertEqual(value, "")
-        self.assertEqual(output, "\b \b")
+        self.assertEqual(output, "甲\b \b\r\n")
 
     def test_eof_returns_eof(self):
         value, _ = self.read([b""])
@@ -69,13 +70,14 @@ class InterruptibleInputTests(unittest.TestCase):
         applied = []
         with patch("harness.interruptible_input.termios.ICANON", 0x0002), \
                 patch("harness.interruptible_input.termios.IEXTEN", 0x8000), \
+                patch("harness.interruptible_input.termios.ECHO", 0x0008), \
                 patch("harness.interruptible_input.termios.TCSADRAIN", 1), \
                 patch("harness.interruptible_input.termios.tcgetattr", return_value=original[:]) as get, \
                 patch("harness.interruptible_input.termios.tcsetattr", side_effect=lambda fd, when, mode: applied.append(mode[:])) as set_mode:
             with terminal_cbreak(3):
                 pass
         get.assert_called_once_with(3)
-        self.assertEqual(applied[0][3], original[3] & ~(0x0002 | 0x8000))
+        self.assertEqual(applied[0][3], original[3] & ~(0x0002 | 0x8000 | 0x0008))
         self.assertEqual(applied[1], original)
         self.assertEqual(set_mode.call_count, 2)
 

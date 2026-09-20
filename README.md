@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V1.0.2 — bugfix-模型切换**（Git 标签 `v1.0.2`）。修复模型热切换并映射 DeepSeek Pro API 模型名。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V1.0.3 — bugfix-乱码修复**（Git 标签 `v1.0.3`）。修复交互终端 busy 输入和流式渲染偶发乱码。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 安装
 
