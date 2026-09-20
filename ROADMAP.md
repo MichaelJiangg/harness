@@ -151,6 +151,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.10.3 已发布。远端 `main` 提交为 `7ab872a6c6b432f9e68a33ab4f74ab9380186a30`，注解标签对象为 `d1e831f304378756f5a02f3d4e5064b80603219e`，标签 `v0.10.3` 指向该提交；Release「V0.10.3 - Add-启动流程」为正式版、非草稿并作为 Latest。
 - 2026-09-20：健壮启动流程完成后全量 599 项离线测试通过，覆盖必需模块失败退出、Hooks／记忆警告降级、MCP 连接失败报告、报告格式和 `--check` 参数；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.10.2 已发布。远端 `main` 提交为 `ec6166b197f964130c00652b951e4abe50a379ba`，注解标签对象为 `9707fb8c806a9d5ec31446c629a0667ff5ccd4a3`，标签 `v0.10.2` 指向该提交；Release「V0.10.2 - Add-统一配置管理」为正式版、非草稿并作为 Latest。
 - 2026-09-20：统一配置管理完成后全量 596 项离线测试通过，覆盖无配置默认启动、partial config.toml 合并、CLI/环境变量/文件优先级、MCP 列表覆盖、无效配置脱敏、CLI 参数解析、运行时集成和 `max_turns` 上限；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
