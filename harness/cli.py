@@ -17,6 +17,7 @@ from .background import BackgroundManager, COMPLETED
 from .client import DEFAULT_MODEL
 from .config import get_settings
 from .engine import QueryAborted, QueryState, SYSTEM_PROMPT, compact_history, query_loop
+from .hooks import HookManager
 from .memory import (
     MemoryStore, VectorMemoryStore, format_record, format_recall_result,
     has_memory_candidates, memory_system_prompt, recall_memories, summarize_session,
@@ -78,7 +79,8 @@ ACTIVITY_MAX_EVENTS = 500
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
             character_delay=None, memory_enabled=False, memory_store=None,
-            notes_enabled=False, notes_store=None, vector_store=None):
+            notes_enabled=False, notes_store=None, vector_store=None,
+            hooks_enabled=False, hooks_manager=None):
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
     ledger = ledger if ledger is not None else UsageLedger()
@@ -123,7 +125,20 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             notes_content = notes_store.read()
         except Exception as error:
             notes_load_error = str(error)
+    if hooks_manager is not None and not isinstance(hooks_manager, HookManager):
+        raise ValueError("hooks_manager 必须是 HookManager。")
+    if hooks_manager is not None:
+        hook_manager = hooks_manager
+    elif hooks_enabled:
+        hook_manager = HookManager(Path.cwd())
+    else:
+        hook_manager = HookManager(Path("/__harness_hooks_disabled__"))
+    hook_start_result = hook_manager.run("session_start", {})
     base_system_content = notes_system_prompt(SYSTEM_PROMPT, notes_content)
+    if hook_start_result.prompts:
+        base_system_content += "\n\n## 会话启动钩子\n" + "\n".join(
+            hook_start_result.prompts
+        )
     semantic_memory = memory_enabled and vector_store.available
     messages = [{
         "role": "system",
@@ -152,6 +167,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     stream_live = None
     prompt_shown = False
     input_closed = False
+    session_ended = False
 
     def show_prompt():
         nonlocal prompt_shown
@@ -190,6 +206,20 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 )
             else:
                 print(text, file=error_output if error else output, flush=True)
+
+    def report_hook_result(event, result):
+        for output in result.outputs:
+            write(f"[hook] {event}: {output}", style="magenta")
+        for error in result.errors:
+            write(f"[hook] {event}: {error}", error=True)
+
+    def finish_session_hooks():
+        nonlocal session_ended
+        if session_ended:
+            return
+        result = hook_manager.run("session_end", {})
+        report_hook_result("session_end", result)
+        session_ended = True
 
     def write_markdown(title, content):
         with output_lock:
@@ -722,6 +752,12 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         )
         if (delegated or background or swarm) and event["type"] in {"text", "response_start"}:
             return
+        if event["type"] == "hook":
+            for output in event.get("outputs", []):
+                write(f'[hook] {event.get("event", "")}: {output}', style="magenta")
+            for error in event.get("errors", []):
+                write(f'[hook] {event.get("event", "")}: {error}', error=True)
+            return
         hidden_types = {
             "tool", "usage", "compact_start", "compact_done", "compact_skipped",
         }
@@ -820,6 +856,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 messages = state.messages
                 if not response_streamed:
                     write_markdown("Assistant", answer)
+                result = hook_manager.run("after_reply", {"reply": answer})
+                report_hook_result("after_reply", result)
         except QueryAborted:
             pass
         except Exception as error:
@@ -848,6 +886,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             write("[memory] 向量记忆已启用。", style="dim")
         else:
             write("[memory] 向量搜索不可用，退回到最近记忆模式。", style="dim")
+    report_hook_result("session_start", hook_start_result)
+    if hook_manager.load_error:
+        write(f"[hook] 配置加载失败：{hook_manager.load_error}", error=True)
     if memory_load_error:
         write(f"[memory] 启动时未加载本地记忆：{memory_load_error}", error=True)
     if notes_load_error:
@@ -866,6 +907,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     worker.join()
                 background_manager.shutdown()
                 save_memory_summary()
+                finish_session_hooks()
                 return
             text = line.strip()
             if text == "/exit":
@@ -877,6 +919,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 with output_lock:
                     end_stream_line()
                 save_memory_summary()
+                finish_session_hooks()
                 return
             if text == "/help":
                 write(HELP)
@@ -922,12 +965,19 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             elif worker and worker.is_alive():
                 write("上一轮查询进行中，请等待回答；期间可以输入 /cost。")
             else:
+                hook_result = hook_manager.run(
+                    "before_send_message", {"message": text},
+                )
+                report_hook_result("before_send_message", hook_result)
+                if hook_result.prompts:
+                    text = text + "\n\n## 发送前钩子\n" + "\n".join(hook_result.prompts)
                 inject_memory_for_query(text)
                 turn += 1
                 compact = text == "/compact"
                 state = QueryState(
                     client=client, ledger=ledger, turn=turn, abort=abort, on_event=on_event,
                     tool_executor=tool_executor,
+                    hooks=hook_manager,
                     messages=deepcopy(messages) + ([] if compact else [{"role": "user", "content": text}]),
                 )
                 worker = Thread(target=run_query, args=(state,), kwargs={"compact": compact}, daemon=True)
@@ -938,6 +988,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if worker:
             worker.join(timeout=1)
         background_manager.shutdown()
+        finish_session_hooks()
         write("\n查询已停止。")
 
 

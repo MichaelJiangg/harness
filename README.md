@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.6.3.1 — Add-智能搜索、记忆注入**（Git 标签 `v0.6.3.1`）。在 V0.6.2 基础上增加可选语义记忆召回、`/recall` 和分层记忆注入。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.7.1 — Add-钩子机制**（Git 标签 `v0.7.1`）。在 V0.6.3.1 智能记忆基础上增加生命周期 Hooks 配置。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -128,6 +128,39 @@ TAVILY_API_KEY=你的Tavily密钥
 ```
 
 `.env*` 已被 `.gitignore` 排除；代码、工具参数、权限日志和 GitHub 发布清单不会包含该密钥。
+
+## Hooks
+
+用户可以在当前工作区 `.harness/hooks.json` 注册生命周期逻辑：
+
+```json
+{
+  "hooks": [
+    {
+      "event": "session_start",
+      "type": "shell",
+      "name": "记录启动",
+      "command": "echo started >> /tmp/harness.log"
+    },
+    {
+      "event": "before_send_message",
+      "type": "prompt",
+      "name": "回答约束",
+      "prompt": "回答保持简洁。"
+    }
+  ]
+}
+```
+
+支持事件：`session_start`、`session_end`、`before_send_message`、`after_reply`、`before_tool`、`after_tool`。Hook 类型：
+
+| 类型 | 说明 |
+| --- | --- |
+| `shell` | 执行一条 Bash 命令，独立超时，默认 30 秒，最长 120 秒 |
+| `prompt` | 注入一段提示词；主要用于 session_start 和 before_send_message |
+| `python` | 从 `.harness/hook_functions.py` 加载函数 |
+
+Shell Hook 的环境会清除 DeepSeek/Tavily 密钥，并注入 `HARNESS_EVENT`、`HARNESS_WORKSPACE`、`HARNESS_TOOL`。Hook 异常不会中止查询。
 
 ## 项目配置
 
@@ -517,6 +550,7 @@ V0.5 提供三种编排方式：
 | `harness/background.py` | 后台任务状态、排队、并发限制与超时 |
 | `harness/memory/` | 本地 JSON 记忆、启动注入、退出摘要和记忆命令；`session.py` 保存核心，`injection.py` 负责上下文注入 |
 | `harness/memory/search.py` | 可选 ChromaDB 向量召回、文本降级和 `/recall` 相关度计算 |
+| `harness/hooks.py` | 加载并执行会话、消息和工具生命周期 Hooks |
 | `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
 | `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |

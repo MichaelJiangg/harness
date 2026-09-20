@@ -105,6 +105,7 @@ class ConfigTests(unittest.TestCase):
             client.return_value,
             memory_enabled=True,
             notes_enabled=True,
+            hooks_enabled=True,
         )
 
 

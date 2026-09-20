@@ -1,5 +1,14 @@
 # 版本记录
 
+## V0.7.1 — Add-钩子机制
+
+Git 标签：`v0.7.1`。
+
+- 新增生命周期 Hooks：支持 `session_start`、`session_end`、`before_send_message`、`after_reply`、`before_tool`、`after_tool`。
+- Hooks 从当前工作区 `.harness/hooks.json` 加载，支持 `shell`、`prompt` 和 `python` 三种类型；Python 函数从 `.harness/hook_functions.py` 加载。
+- Shell Hook 使用独立超时并清除 DeepSeek/Tavily 密钥环境；错误不会中断主流程，但会在终端和活动日志中显示。
+- Hooks 同时应用于主查询、委托、后台分析和 Swarm 角色。
+
 ## V0.6.3.1 — Add-智能搜索、记忆注入
 
 Git 标签：`v0.6.3.1`。

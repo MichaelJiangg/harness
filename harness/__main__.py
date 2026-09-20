@@ -17,6 +17,7 @@ def main():
             DeepSeekClient(load_api_key()),
             memory_enabled=True,
             notes_enabled=True,
+            hooks_enabled=True,
         )
     except ValueError as error:
         print(f"错误：{error}", file=sys.stderr)

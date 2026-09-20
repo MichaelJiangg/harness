@@ -80,6 +80,7 @@ class QueryState:
     compaction_count: int = 0
     tool_executor: Callable = field(default_factory=create_tool_executor)
     on_event: Callable = lambda event: None
+    hooks: object = field(default=None, repr=False)
 
 
 class QueryAborted(RuntimeError):
@@ -324,8 +325,31 @@ def _execute_call(state, call):
         return {"status": "error", "executed": False, "tool": function["name"],
                 "code": "invalid_arguments", "message": "工具参数不是有效 JSON。"}
     try:
+        _run_hooks(state, "before_tool", {"tool": function["name"], "arguments": arguments})
         with query_context(state):
-            return state.tool_executor(function["name"], arguments)
+            result = state.tool_executor(function["name"], arguments)
+        _run_hooks(
+            state, "after_tool",
+            {"tool": function["name"], "arguments": arguments, "result": result},
+        )
+        return result
     except Exception:
         return {"status": "error", "executed": False, "tool": function["name"],
                 "code": "execution_error", "message": "工具执行器发生错误，未取得有效结果。"}
+
+
+def _run_hooks(state, event, context):
+    hooks = getattr(state, "hooks", None)
+    if hooks is None:
+        return
+    try:
+        result = hooks.run(event, context)
+        if result.outputs or result.errors:
+            state.on_event({
+                "type": "hook",
+                "event": event,
+                "outputs": result.outputs,
+                "errors": result.errors,
+            })
+    except Exception:
+        pass

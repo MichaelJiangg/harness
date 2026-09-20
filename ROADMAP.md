@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.6.3.1 — Add-智能搜索、记忆注入](https://github.com/MichaelJiangg/harness/releases/tag/v0.6.3.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.6.3.1`。
+最近公开版本为 [V0.7.1 — Add-钩子机制](https://github.com/MichaelJiangg/harness/releases/tag/v0.7.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.7.1`。
 
 ## 已完成
 
@@ -109,6 +109,7 @@
 - 修复 Swarm 将 `APIError` 和其他运行时异常误报为团队请求额度耗尽的问题；按团队预算、角色预算、API 错误和角色失败分别返回错误码。
 - 新增可选语义记忆召回：安装 ChromaDB 后按当前问题检索历史摘要，未安装时退回最近 N 条并保留文本召回；新增 `/recall` 命令和记忆 `key_points` 字段。
 - 记忆注入采用项目笔记、最近会话、冷记忆三层顺序，并按字符预算优先裁剪冷记忆和最旧会话，项目笔记不裁剪。
+- 新增生命周期 Hooks：从 `.harness/hooks.json` 加载 shell、prompt 和 python 逻辑，覆盖会话、消息和工具六个事件点，并统一作用于主查询与子 Agent。
 - 新增 `harness/notes.py` 和工作区根目录 `HARNESS.md`：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换长期项目知识；固定单文件、最多 65536 字节，拒绝软链接、目录和二进制内容。
 - CLI 新增 `/notes`、`/notes append <text>`、`/notes replace --yes <text>` 和 `/notes clear --yes`；追加默认放行，整篇替换默认询问，`deny` 始终优先。项目笔记默认只在 CLI 启动入口启用。
 
@@ -129,6 +130,7 @@
 
 ## 最近验证
 
+- 2026-09-20：Hooks 机制完成后全量 570 项离线测试通过，覆盖配置加载、shell/prompt/python 执行、会话事件、消息提示注入和工具前后钩子。
 - 2026-09-20：V0.6.3.1 已发布。远端 `main` 提交为 `80650ea36a784698bb1f0ebe73c2f90de29b0c64`，注解标签对象为 `16eead4370bfe2e66e3c4f2dabe00da4efc5b174`，标签 `v0.6.3.1` 指向该提交；Release「V0.6.3.1 - Add-智能搜索、记忆注入」为正式版、非草稿并作为 Latest。远端发布树与本地 94 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：记忆分层注入与容量裁剪完成后全量 565 项离线测试通过，覆盖最近优先于冷记忆、评分展示、冷记忆先裁剪和项目笔记保留。
 - 2026-09-20：智能记忆召回完成后全量 563 项离线测试通过，覆盖文本召回、向量结果阈值过滤、语义注入和 `/recall` 降级模式。

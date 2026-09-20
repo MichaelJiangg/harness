@@ -93,6 +93,7 @@ def run_delegate(*, description, task, executor_factory, tools):
         context_limit=parent.context_limit, summary_limit=parent.summary_limit,
         keep_recent_turns=parent.keep_recent_turns, max_compactions=parent.max_compactions,
         tool_result_limit=parent.tool_result_limit, request_parent=parent,
+        hooks=parent.hooks,
     )
     parent.on_event({"type": "delegate_start", "description": description})
     try:
@@ -144,6 +145,7 @@ def run_background_analysis(*, parent, task, tools, executor_factory, stop_event
         context_limit=parent.context_limit, summary_limit=parent.summary_limit,
         keep_recent_turns=parent.keep_recent_turns, max_compactions=parent.max_compactions,
         tool_result_limit=parent.tool_result_limit,
+        hooks=parent.hooks,
     )
     try:
         report = query_loop(child)
@@ -230,6 +232,7 @@ def run_swarm(*, parent, description, task, roles, max_rounds, make_executor):
             summary_limit=parent.summary_limit, keep_recent_turns=parent.keep_recent_turns,
             max_compactions=parent.max_compactions, tool_result_limit=parent.tool_result_limit,
             request_parent=budget,
+            hooks=parent.hooks,
         )
         emit({"type": "role_start", "description": f"{current.name} 开始工作"})
         try:
