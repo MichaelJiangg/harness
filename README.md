@@ -1,8 +1,8 @@
 # harness
 
-一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
+一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.9.1 — Add-进度反馈、速度提升**（Git 标签 `v0.9.1`）。增加等待动画、工具执行进度和异步 MCP 启动。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.9.2 — Add-新增GLM模型支持**（Git 标签 `v0.9.2`）。增加 GLM 模型提供商自动切换、密钥隔离和用量字段归一化。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -13,11 +13,14 @@ git clone https://github.com/MichaelJiangg/harness.git
 cd harness
 ```
 
-首次使用，在项目根目录创建 `.env` 并填写密钥（该文件不会随仓库发布）：
+首次使用，在项目根目录创建 `.env` 并填写密钥（该文件不会随仓库发布）。以下示例同时保留 DeepSeek 和 GLM，未填写的 provider 会被自动跳过：
 
 ```dotenv
 DEEPSEEK_API_KEY=你的DeepSeek密钥
+GLM_API_KEY=你的GLM密钥
 TAVILY_API_KEY=你的Tavily密钥
+# 可选：auto | deepseek | glm，默认 auto
+HARNESS_PROVIDER=auto
 ```
 
 之后每次在项目目录直接运行：
@@ -27,13 +30,19 @@ python3 -m pip install "rich>=13.0"
 python3 -m harness
 ```
 
-启动时自动读取项目根目录 `.env`，无需每次 `export`。如果当前进程已设置 `DEEPSEEK_API_KEY`，环境变量优先于文件（包括已设置的空值）。支持单行值、单／双引号、注释和可选 `export` 前缀，不执行 shell 命令或变量插值；仅读取该密钥，不注入其他变量。`.gitignore` 已排除 `.env*`，不要将真实密钥提交到 Git。
+启动时自动读取项目根目录 `.env`，无需每次 `export`。如果当前进程已设置 `DEEPSEEK_API_KEY`、`GLM_API_KEY` 或 `HARNESS_PROVIDER`，环境变量优先于文件（包括已设置的空值）。支持单行值、单／双引号、注释和可选 `export` 前缀，不执行 shell 命令或变量插值；仅读取这些键，不注入其他变量。`.gitignore` 已排除 `.env*`，不要将真实密钥提交到 Git。
+
+| `HARNESS_PROVIDER` | 行为 |
+| --- | --- |
+| `auto`（默认） | `GLM_API_KEY` 非空时使用 GLM，否则回退 DeepSeek；两者都没有时启动报错 |
+| `deepseek` | 强制使用 DeepSeek，缺少 `DEEPSEEK_API_KEY` 时启动报错 |
+| `glm` | 强制使用 GLM，缺少 `GLM_API_KEY` 时启动报错 |
 
 ```text
 你 > 帮我读取 README.md
 [请求用量记录]
 [工具] read_file：已读取文件（…… 字符）。
-DeepSeek > README 介绍了这个查询引擎的使用方式……
+模型 > README 介绍了这个查询引擎的使用方式……
 [请求用量记录]
 你 > /cost
 [本次会话累计 token、预估费用及每次请求明细]
@@ -59,7 +68,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 
 ## 会话记忆
 
-正常通过 `/exit` 或输入结束退出时，Harness 会调用 DeepSeek 把本次对话压缩成一条摘要，保存到当前工作区的 `.harness/memory.json`。下次启动时自动加载最近 5 条摘要，作为背景注入系统提示，模型据此回答“上次讨论了什么”之类的问题。
+正常通过 `/exit` 或输入结束退出时，Harness 会调用当前模型把本次对话压缩成一条摘要，保存到当前工作区的 `.harness/memory.json`。下次启动时自动加载最近 5 条摘要，作为背景注入系统提示，模型据此回答“上次讨论了什么”之类的问题。
 
 每条记录包含数字编号、UTC 日期、摘要和话题标签。摘要最多 1000 字，文件最多保留 20 条记录；文件采用 JSON 格式，权限为 `0600`，通过同目录临时文件原子替换，损坏时不会阻止 CLI 启动。摘要请求只提交用户和助手文字以及工具名称，不提交工具结果正文，避免把文件或命令输出写入记忆。
 
@@ -164,7 +173,7 @@ TAVILY_API_KEY=你的Tavily密钥
 | `prompt` | 注入一段提示词；主要用于 session_start 和 before_send_message |
 | `python` | 从 `.harness/hook_functions.py` 加载函数 |
 
-Shell Hook 的环境会清除 DeepSeek/Tavily 密钥，并注入 `HARNESS_EVENT`、`HARNESS_WORKSPACE`、`HARNESS_TOOL`。Hook 异常不会中止查询。
+Shell Hook 的环境会清除 DeepSeek/GLM/Tavily 密钥，并注入 `HARNESS_EVENT`、`HARNESS_WORKSPACE`、`HARNESS_TOOL`。Hook 异常不会中止查询。
 
 ## Skills
 
@@ -227,7 +236,7 @@ Harness 可以通过标准输入输出连接外部 Model Context Protocol 工具
 
 `.harness/mcp.json` 存在时优先于 `pyproject.toml` 的 `tool.harness.mcp.servers`；`pyproject.toml` 继续作为没有本地 JSON 配置时的回退。`.harness/` 已被 Git 排除，因此数据库地址、本机路径和不同项目的服务器配置不会进入仓库。
 
-启动时会读取配置，并在后台依次连接服务器、发送 `initialize` 和 `tools/list`，因此提示符不需要等待外部 MCP 进程启动。首个提问会最多等待 3 秒完成首次连接并刷新工具列表，超时则先用内置工具继续；连接成功后把外部工具注册为 `mcp_<server>_<tool>`。冒号等 DeepSeek 工具名不接受的字符会替换为下划线。
+启动时会读取配置，并在后台依次连接服务器、发送 `initialize` 和 `tools/list`，因此提示符不需要等待外部 MCP 进程启动。首个提问会最多等待 3 秒完成首次连接并刷新工具列表，超时则先用内置工具继续；连接成功后把外部工具注册为 `mcp_<server>_<tool>`。冒号等模型工具名不接受的字符会替换为下划线。
 
 每台服务器会在独立后台监控线程中维持连接。进程异常退出后会自动指数退避重连，默认首次间隔 1 秒、最大 30 秒；重连成功后重新发现工具并刷新当前查询的工具列表。工具调用发生在断线瞬间时会返回错误，下一次调用或下一次提问在重连完成后继续使用。
 
@@ -257,7 +266,7 @@ allow = ["read_file", "mcp_tavily_tavily_search"]
 deny = ["mcp_tavily_tavily_crawl"]
 ```
 
-每个配置文件最多声明 50 台服务器，每台最多发现 200 个工具，单个请求默认超时 120 秒；服务器失败会记录错误并继续加载其他服务器，退出时会关闭全部子进程。MCP 子进程默认不继承 Harness 的 DeepSeek/Tavily 密钥，配置中显式声明或通过 `${VARIABLE}` 引用的环境变量仍可注入。工具服务器仍以当前用户权限运行，也不受文件工具的工作区限制，应只配置可信服务器。不要把真实密钥直接写进 `.harness/mcp.json` 或 `pyproject.toml`。
+每个配置文件最多声明 50 台服务器，每台最多发现 200 个工具，单个请求默认超时 120 秒；服务器失败会记录错误并继续加载其他服务器，退出时会关闭全部子进程。MCP 子进程默认不继承 Harness 的 DeepSeek/GLM/Tavily 密钥，配置中显式声明或通过 `${VARIABLE}` 引用的环境变量仍可注入。工具服务器仍以当前用户权限运行，也不受文件工具的工作区限制，应只配置可信服务器。不要把真实密钥直接写进 `.harness/mcp.json` 或 `pyproject.toml`。
 
 `python3 -m harness` 默认启用 MCP 配置；直接调用 `run_cli` 的嵌入场景默认关闭。外部工具使用服务器声明的 JSON Schema 展示给模型，本地执行器不会套用内置工具的子集校验，参数合法性由 MCP 服务器自行处理。
 
@@ -396,30 +405,31 @@ CLI 首次确认写入时，除完整内容外，还会显示「本会话授权�
 ## 查询循环
 
 ```text
-用户输入 → DeepSeek
+用户输入 → 当前模型
               ├─ 最终文字回答 → 显示回答，等待下个问题
-              └─ 工具调用 → 按名称执行工具 → 按 tool_call_id 回传结果 → DeepSeek
+              └─ 工具调用 → 按名称执行工具 → 按 tool_call_id 回传结果 → 当前模型
 ```
 
 核心入口是 `harness/engine.py` 中的 `query_loop(state)`：
 
 ```python
-from harness.client import DeepSeekClient
-from harness.config import load_api_key
+from harness.client import ChatCompletionClient
+from harness.config import select_model_provider
 from harness.engine import QueryState, query_loop
 from harness.usage import UsageLedger
 
+provider, api_key = select_model_provider()
 state = QueryState(
-    client=DeepSeekClient(load_api_key()),
+    client=ChatCompletionClient(api_key, provider=provider),
     ledger=UsageLedger(),
 )
 state.messages.append({"role": "user", "content": "帮我读取 README.md"})
 print(query_loop(state))
 ```
 
-沿用用户给定的 Python 循环结构，客户端直接调用 DeepSeek Chat Completions。该协议返回 `tool_calls`，对应 Anthropic 示例中的 `tool_use`；回传使用 `role: "tool"` 和 `tool_call_id`。不依赖 Anthropic SDK，也不调用 Claude 模型。
+沿用用户给定的 Python 循环结构，客户端直接调用 OpenAI 兼容的 Chat Completions 接口，自动选择 DeepSeek 或 GLM。该协议返回 `tool_calls`，对应 Anthropic 示例中的 `tool_use`；回传使用 `role: "tool"` 和 `tool_call_id`。不依赖 Anthropic SDK，也不调用 Claude 模型。
 
-- 使用 `deepseek-flash`，流式请求，显式设置 `thinking.type = "disabled"`。收到文字后逐字显示，接收结束后保留完整回答到对话历史。
+- DeepSeek 使用 `deepseek-flash`，流式请求并显式设置 `thinking.type = "disabled"`；GLM 使用 `glm-5.3-flash`，流式请求并启用思考模式。收到文字后逐字显示，接收结束后保留完整回答到对话历史。
 - 在同一进程内保留成功查询的对话历史；后续问题可以引用之前的回答。
 - 一次返回多个工具调用时，逐个执行并回传所有结果。即使回复附带文字，也会优先处理其中的工具调用。
 - 工具名称和参数分片先拼接完整，再交给原有工具循环；token 用量从末尾流式数据读取，每次请求只记录一次。
@@ -438,7 +448,7 @@ print(query_loop(state))
 ```text
 harness/tools/
 ├── __init__.py      # 初始化注册表并导出公共接口
-├── definition.py    # 工具定义和 DeepSeek 格式转换
+├── definition.py    # 工具定义和 OpenAI 兼容格式转换
 ├── registry.py      # 自动发现、注册、按名称查找
 ├── executor.py      # 参数校验、权限检查、本地确认、执行分发
 ├── read_file.py     # 读文件的定义与具体实现
@@ -468,7 +478,7 @@ harness/tools/
 
 启动时，`registry.py` 自动发现本包直属工具模块，跳过基础模块、下划线开头的辅助模块和子包，通过 `DEFINITION` 与 `execute` 建立名称映射。重复名称、缺失定义或不可调用的实现会明确报错。新增工具只需按上述约定添加模块并重启程序，无需维护工具列表或修改查询循环。
 
-引擎通过 `get_tool_definitions()` 获取描述，内部 `input_schema` 转换为 DeepSeek 的 `function.parameters`。`executor.py` 负责查找工具、校验参数、通过统一权限策略判断、取得必要的本地确认、调用实现并补充统一结果字段；当前支持本项目使用的对象、字符串、整数及必填、额外字段、最短长度和整数上下界规则，未支持的规则会拒绝执行。文件路径、类型、编码和大小等语义检查由具体工具负责。工具定义中的旧 `requires_confirmation` 标志已由集中权限替代。
+引擎通过 `get_tool_definitions()` 获取描述，内部 `input_schema` 转换为 OpenAI 兼容的 `function.parameters`。`executor.py` 负责查找工具、校验参数、通过统一权限策略判断、取得必要的本地确认、调用实现并补充统一结果字段；当前支持本项目使用的对象、字符串、整数及必填、额外字段、最短长度和整数上下界规则，未支持的规则会拒绝执行。文件路径、类型、编码和大小等语义检查由具体工具负责。工具定义中的旧 `requires_confirmation` 标志已由集中权限替代。
 
 读文件参数：
 
@@ -550,7 +560,7 @@ harness/tools/
 | `command` | 必填，非空命令字符串，支持 Bash 管道和重定向 |
 | `timeout` | 可选，超时秒数，默认 `30`，整数范围 `1`～`120` |
 
-命令从会话启动目录运行，每次启动独立 `/bin/bash`，不读取 shell 启动脚本，标准输入关闭，不支持需要用户持续输入的终端程序。明确识别的只读命令使用受限环境及固定系统 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），不导入函数或动态加载器设置。其他命令保留更多当前环境，但同样清除 `DEEPSEEK_API_KEY`、`BASH_ENV`、`ENV`、`BASH_FUNC_*`、`LD_*` 与 `DYLD_*`。当前实现支持 macOS／Linux；命令具有当前用户权限，起始工作目录不是文件访问沙箱，文件读写工具的路径隔离不适用于任意 shell 命令。
+命令从会话启动目录运行，每次启动独立 `/bin/bash`，不读取 shell 启动脚本，标准输入关闭，不支持需要用户持续输入的终端程序。明确识别的只读命令使用受限环境及固定系统 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），不导入函数或动态加载器设置。其他命令保留更多当前环境，但同样清除 `DEEPSEEK_API_KEY`、`GLM_API_KEY`、`BASH_ENV`、`ENV`、`BASH_FUNC_*`、`LD_*` 与 `DYLD_*`。当前实现支持 macOS／Linux；命令具有当前用户权限，起始工作目录不是文件访问沙箱，文件读写工具的路径隔离不适用于任意 shell 命令。
 
 命令结果分别回传两路输出，即使退出码非零或超时，也保留已经产生的输出：
 
@@ -589,7 +599,7 @@ V0.5 提供三种编排方式：
 | --- | --- |
 | 自动触发 | 每次正常模型请求前检查 `messages` 和 `tools` 的序列化长度，超过 24000 字符时压缩 |
 | 保留历史 | 原始系统提示、最近 4 个完整用户轮次和当前未完成轮；工具调用与对应结果整组保留 |
-| 摘要 | 独立调用 DeepSeek，总结目标、约束、关键事实与决策、进展和待办，最多 2000 字符 |
+| 摘要 | 独立调用当前模型，总结目标、约束、关键事实与决策、进展和待办，最多 2000 字符 |
 | 压缩次数 | 每次用户提问或 `/compact` 最多尝试 2 次，计数贯穿整个工具循环 |
 | 长度仍超限 | 提示「太长了，建议开个新会话」；保留部分本身超限时直接提示 |
 | 工具结果 | 每个结果序列化后最多 6000 字符；普通结果用 `head`／`tail` 保留首尾，命令结果分别缩短 `stdout`／`stderr` 并保留退出码等字段，搜索预先限长并保留完整匹配条目，均标注截断 |
@@ -615,7 +625,7 @@ V0.5 提供三种编排方式：
 - 总数：`total_tokens`。
 - 输入缓存：`prompt_cache_hit_tokens` 和 `prompt_cache_miss_tokens`。
 
-费用按以下公式计算，费率单位为 USD／百万 tokens：
+费用按以下公式计算，费率单位跟随当前 provider 的配置：
 
 ```text
 费用 =（缓存命中 token × 命中单价
@@ -623,7 +633,7 @@ V0.5 提供三种编排方式：
       + 输出 token × 输出单价）÷ 1,000,000
 ```
 
-`deepseek-flash` 费率于 2026-09-18 核验：
+DeepSeek 的 `deepseek-flash` 费率于 2026-09-18 核验，单位为 USD／百万 tokens：
 
 | 时段 | 输入缓存命中 | 输入缓存未命中 | 输出 |
 | --- | ---: | ---: | ---: |
@@ -631,6 +641,8 @@ V0.5 提供三种编排方式：
 | 峰段 | $0.006 | $0.30 | $1.20 |
 
 峰段为周一至周五 UTC 01:00–04:00、06:00–10:00（北京时间 09:00–12:00、14:00–18:00），其余时间为谷段。按响应 `created` 的 UTC 时间估算；该字段缺失时使用本机记录时刻。官方没有明确跨时段请求的定价时点，因此此金额为预估值，实际扣费以 DeepSeek 账单为准。人民币账单有独立价表，不应直接把这里的 USD 数字当作人民币。
+
+GLM 的 `glm-5.3-flash` 目前配置在 `pyproject.toml` 的 `tool.harness.glm.pricing` 中，费率为 `0.0 CNY` 占位值。GLM 返回的缓存命中字段 `prompt_tokens_details.cached_tokens` 会归一化为既有账本使用的 `prompt_cache_hit_tokens`／`prompt_cache_miss_tokens`，因此 token 统计正常，但费用仍按 `0` 估算，直到补入官方价格。
 
 费率及 UTC 时段保存在 `pyproject.toml` 的 `tool.harness.pricing` 中，不自动联网刷新。`peak_weekdays` 使用周一为 `0`、周日为 `6` 的编号；`peak_hours_utc` 使用左闭右开的小时区间。官方费率变化时需更新配置和核验信息。本次仅迁移现有数值，未重新核价；统计只保存在当前进程内存中，退出后清空，不代表账户全部历史消费。
 
@@ -646,7 +658,7 @@ V0.5 提供三种编排方式：
 | `harness/permissions.py` | 规则匹配、风险默认策略、拒绝说明与会话目录授权 |
 | `harness/bash_risk.py` | Bash 启发式检测及保守只读命令识别 |
 | `harness/audit.py` | 脱敏权限审计、私有日志写入与失败反馈 |
-| `harness/client.py` | DeepSeek HTTP 请求、超时与错误分类 |
+| `harness/client.py` | DeepSeek／GLM HTTP 请求、provider 切换、超时与错误分类 |
 | `harness/engine.py` | 查询循环、有限重试、摘要压缩与逐次记账 |
 | `harness/orchestration.py` | 独立委托、后台分析和 Swarm 角色编排 |
 | `harness/background.py` | 后台任务状态、排队、并发限制与超时 |
@@ -658,7 +670,7 @@ V0.5 提供三种编排方式：
 | `harness/mcp.py` | MCP 配置加载、连接状态、自动重连、工具发现和调用转发 |
 | `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
-| `harness/tools/definition.py` | `ToolDefinition`、取消能力、参数校验开关及 DeepSeek 格式转换 |
+| `harness/tools/definition.py` | `ToolDefinition`、取消能力、参数校验开关及 OpenAI 兼容格式转换 |
 | `harness/tools/registry.py` | 自动发现、注册和查找工具，生成描述列表 |
 | `harness/tools/executor.py` | 统一参数校验、本地确认、固定工作目录、分发执行与 `ToolError` |
 | `harness/tools/read_file.py` | 按行读取文件及路径、类型、大小和编码校验 |
@@ -697,6 +709,8 @@ V0.5 Agent 编排离线测试通过，覆盖独立预算、后台生命周期、
 
 终端渲染测试通过，覆盖等待动画、逐字输出顺序、Markdown 标题、代码块、列表、链接、粗斜体、主查询工具参数与耗时，以及交互终端和管道输出的不同行为。
 
-MCP 离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、自动重连、DeepSeek 工具名归一化、JSON-RPC 发现与调用、外部 Schema、CLI 合并转发、环境密钥引用和异常消息忽略。
+GLM 自动切换离线测试通过，覆盖 `HARNESS_PROVIDER` 的 `auto`／强制选择、缺失密钥错误、GLM 请求契约和缓存字段归一化。
 
-官方依据：[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 。
+MCP 离线测试通过，覆盖 `.harness/mcp.json` 加载与校验、多服务器状态、`/mcp` 输出、自动重连、模型工具名归一化、JSON-RPC 发现与调用、外部 Schema、CLI 合并转发、环境密钥引用和异常消息忽略。
+
+官方依据：[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 、[DeepSeek Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 、[DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 、[DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 、[DeepSeek Error Codes](https://api-docs.deepseek.com/quick_start/error_codes/) 、[GLM API 文档](https://docs.bigmodel.cn/llms-full.txt) 。

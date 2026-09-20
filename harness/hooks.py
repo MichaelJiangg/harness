@@ -173,7 +173,7 @@ class HookManager:
 def _hook_environment(environment, workspace, event, context):
     cleaned = dict(environment)
     for name in (
-        "DEEPSEEK_API_KEY", "TAVILY_API_KEY", "BASH_ENV", "ENV", "LD_PRELOAD",
+        "DEEPSEEK_API_KEY", "GLM_API_KEY", "TAVILY_API_KEY", "BASH_ENV", "ENV", "LD_PRELOAD",
         "DYLD_INSERT_LIBRARIES",
     ):
         cleaned.pop(name, None)

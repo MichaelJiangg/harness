@@ -1,7 +1,7 @@
 [project]
 name = "harness"
-version = "0.9.1"
-description = "A Python query engine with DeepSeek and a local tool system."
+version = "0.9.2"
+description = "A Python query engine with DeepSeek/GLM and a local tool system."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["rich>=13.0"]
@@ -13,6 +13,20 @@ Repository = "https://github.com/MichaelJiangg/harness"
 name = "deepseek-flash"
 endpoint = "https://api.deepseek.com/chat/completions"
 request_timeout = 120
+
+[tool.harness.glm]
+name = "glm-5.3-flash"
+endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+request_timeout = 120
+reasoning_effort = "low"
+
+[tool.harness.glm.pricing]
+input_hit_per_million = 0.0
+input_miss_per_million = 0.0
+output_per_million = 0.0
+currency = "CNY"
+source = "https://docs.bigmodel.cn/llms-full.txt"
+checked_at = "2026-09-20"
 
 [tool.harness.display]
 character_delay = 0.02

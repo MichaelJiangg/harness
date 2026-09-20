@@ -91,6 +91,13 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             character_delay=None, memory_enabled=False, memory_store=None,
             notes_enabled=False, notes_store=None, vector_store=None,
             hooks_enabled=False, hooks_manager=None, mcp_enabled=False):
+    active_model = getattr(client, "model", None)
+    active_model = active_model if isinstance(active_model, str) and active_model else DEFAULT_MODEL
+    active_label = getattr(client, "label", None)
+    active_label = active_label if isinstance(active_label, str) and active_label else "DeepSeek"
+    active_subtitle = "Deepseek" if active_label == "DeepSeek" else active_label
+    active_pricing = getattr(client, "pricing", None)
+    active_pricing = active_pricing if isinstance(active_pricing, dict) else None
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
     presets = get_settings()["presets"]
@@ -128,7 +135,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             name="harness-mcp-startup",
         )
         mcp_connect_thread.start()
-    ledger = ledger if ledger is not None else UsageLedger()
+    ledger = (
+        ledger if ledger is not None
+        else UsageLedger(pricing=active_pricing) if active_pricing is not None
+        else UsageLedger()
+    )
     input_stream = input_stream if input_stream is not None else sys.stdin
     output = output if output is not None else sys.stdout
     error_output = error_output if error_output is not None else sys.stderr
@@ -287,7 +298,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 ))
             else:
                 end_stream_line()
-                print(f"\nDeepSeek > {content}", file=output, flush=True)
+                print(f"\n{active_label} > {content}", file=output, flush=True)
 
     def record_activity(message, kind):
         nonlocal activity_entries, activity_next_id
@@ -364,7 +375,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if not terminal:
             with output_lock:
                 if not stream_line_open:
-                    print("\nDeepSeek > " if not response_streamed else "DeepSeek > ",
+                    print(f"\n{active_label} > " if not response_streamed else f"{active_label} > ",
                           end="", file=output, flush=True)
                 print(fragment, end="", file=output, flush=True)
                 stream_line_open = True
@@ -393,12 +404,12 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         if not memory_enabled or not has_memory_candidates(messages):
             return
         try:
-            result = summarize_session(client, messages, model=DEFAULT_MODEL)
+            result = summarize_session(client, messages, model=active_model)
             response = result["response"]
             if response is not None:
                 payload = response if isinstance(response, dict) else {}
                 ledger.record(
-                    usage=payload.get("usage"), model=payload.get("model", DEFAULT_MODEL),
+                    usage=payload.get("usage"), model=payload.get("model", active_model),
                     turn=turn, created=payload.get("created"),
                 )
             record = memory_store.add(
@@ -1131,14 +1142,14 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             console.print(Panel(
                 Group(
                     Text(PRODUCT_NAME, style="bold cyan", justify="center"),
-                    Text(PRODUCT_SUBTITLE, style="dim", justify="center"),
+                    Text(f"Powered by {active_subtitle}", style="dim", justify="center"),
                 ),
                 border_style="cyan",
                 expand=False,
             ))
             console.print(Text(BRIEF_HELP, style="dim"), soft_wrap=True)
     else:
-        write(f"{PRODUCT_NAME} · {PRODUCT_SUBTITLE}\n{BRIEF_HELP}")
+        write(f"{PRODUCT_NAME} · Powered by {active_subtitle}\n{BRIEF_HELP}")
     if mcp_manager is not None:
         if mcp_config_source == ".harness/mcp.json":
             write(
@@ -1289,6 +1300,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     tool_executor=tool_executor,
                     hooks=hook_manager,
                     tools=query_tools,
+                    model=active_model,
                     messages=deepcopy(messages) + ([] if compact else [{"role": "user", "content": text}]),
                 )
                 worker = Thread(target=run_query, args=(state,), kwargs={"compact": compact}, daemon=True)

@@ -1,6 +1,6 @@
 import sys
 
-from .config import get_settings, load_api_key
+from .config import get_settings, select_model_provider
 
 
 def main():
@@ -8,13 +8,14 @@ def main():
         # 先验证配置，再导入依赖配置的模块，确保错误只显示简短说明。
         get_settings()
         from .cli import HELP, run_cli
-        from .client import DeepSeekClient
+        from .client import ChatCompletionClient
 
         if "--help" in sys.argv[1:]:
-            print(f"在项目 .env 中填写 DEEPSEEK_API_KEY 后运行 python3 -m harness。\n\n{HELP}")
+            print(f"在项目 .env 中填写 DEEPSEEK_API_KEY 或 GLM_API_KEY 后运行 python3 -m harness。\n\n{HELP}")
             return 0
+        provider, api_key = select_model_provider()
         run_cli(
-            DeepSeekClient(load_api_key()),
+            ChatCompletionClient(api_key, provider=provider),
             memory_enabled=True,
             notes_enabled=True,
             hooks_enabled=True,

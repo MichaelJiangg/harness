@@ -533,7 +533,7 @@ class CLITests(unittest.TestCase):
             timeout=3,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("请在项目 .env 或环境变量中设置 DEEPSEEK_API_KEY。", result.stderr)
+        self.assertIn("设置 DEEPSEEK_API_KEY 或 GLM_API_KEY", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.stdout, "")
 

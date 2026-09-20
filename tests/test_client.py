@@ -4,7 +4,7 @@ import unittest
 from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 
-from harness.client import APIError, DeepSeekClient
+from harness.client import APIError, ChatCompletionClient, DeepSeekClient
 
 
 def event(chunk):
@@ -60,6 +60,41 @@ class ClientTests(unittest.TestCase):
                 "role": "assistant", "content": "你好",
             }}],
         })
+
+    def test_glm_request_contract_and_usage_cache_normalization(self):
+        messages = [{"role": "user", "content": "你好"}]
+        usage = {
+            "prompt_tokens": 8,
+            "completion_tokens": 2,
+            "total_tokens": 10,
+            "prompt_tokens_details": {"cached_tokens": 3},
+        }
+
+        def opener(request, *, timeout):
+            self.assertEqual(request.full_url, "https://open.bigmodel.cn/api/paas/v4/chat/completions")
+            self.assertEqual(request.get_header("Authorization"), "Bearer glm-test-key")
+            body = json.loads(request.data)
+            self.assertEqual(body["model"], "glm-5.3-flash")
+            self.assertEqual(body["thinking"], {"type": "enabled"})
+            self.assertEqual(body["reasoning_effort"], "low")
+            self.assertEqual(timeout, 120)
+            return io.BytesIO(stream(
+                chunk({"content": "你好"}, model="glm-5.3-flash", created=123),
+                chunk(finish_reason="stop", usage=usage),
+            ))
+
+        client = ChatCompletionClient(
+            "glm-test-key", opener=opener, provider="glm",
+        )
+        response = client.complete(
+            model=client.model, messages=messages, tools=[],
+        )
+        self.assertEqual(response["usage"]["prompt_cache_hit_tokens"], 3)
+        self.assertEqual(response["usage"]["prompt_cache_miss_tokens"], 5)
+
+    def test_glm_api_key_error_names_correct_provider(self):
+        with self.assertRaisesRegex(ValueError, "GLM_API_KEY"):
+            ChatCompletionClient("", provider="glm")
 
     def test_summary_request_disables_tools_and_limits_output(self):
         requests = []

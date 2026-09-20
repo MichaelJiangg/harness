@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -44,7 +45,37 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(config.load_tavily_api_key(), "env-tavily")
             read_text.assert_not_called()
         with patch.object(Path, "read_text", return_value='TAVILY_API_KEY="file-tavily"' ):
-            self.assertEqual(config.load_tavily_api_key(environ={}), "file-tavily")
+                    self.assertEqual(config.load_tavily_api_key(environ={}), "file-tavily")
+
+    def test_model_provider_auto_prefers_glm_and_falls_back_to_deepseek(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "DEEPSEEK_API_KEY=deepseek-test\nGLM_API_KEY=glm-test\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                config.select_model_provider(env_file=path, environ={}),
+                ("glm", "glm-test"),
+            )
+            path.write_text("DEEPSEEK_API_KEY=deepseek-test\n", encoding="utf-8")
+            self.assertEqual(
+                config.select_model_provider(env_file=path, environ={}),
+                ("deepseek", "deepseek-test"),
+            )
+
+    def test_model_provider_can_be_forced_and_validated(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "HARNESS_PROVIDER=deepseek\nGLM_API_KEY=glm-test\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY 或 GLM_API_KEY"):
+                config.select_model_provider(env_file=path, environ={})
+            path.write_text("HARNESS_PROVIDER=invalid\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "HARNESS_PROVIDER"):
+                config.select_model_provider(env_file=path, environ={})
 
     def test_supported_value_syntax_and_custom_file_path(self):
         examples = (
@@ -95,12 +126,13 @@ class ConfigTests(unittest.TestCase):
 
     def test_main_passes_loaded_key_to_client(self):
         with patch("sys.argv", ["harness"]):
-            with patch.object(entrypoint, "load_api_key", return_value="test-value") as load:
-                with patch("harness.client.DeepSeekClient") as client:
+            with patch.object(entrypoint, "select_model_provider",
+                              return_value=("deepseek", "test-value")) as select:
+                with patch("harness.client.ChatCompletionClient") as client:
                     with patch("harness.cli.run_cli") as run_cli:
                         self.assertEqual(entrypoint.main(), 0)
-        load.assert_called_once_with()
-        client.assert_called_once_with("test-value")
+        select.assert_called_once_with()
+        client.assert_called_once_with("test-value", provider="deepseek")
         run_cli.assert_called_once_with(
             client.return_value,
             memory_enabled=True,

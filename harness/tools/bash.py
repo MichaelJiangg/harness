@@ -72,7 +72,7 @@ def execute(arguments, workspace, *, abort=None):
     else:
         environment = {
             key: value for key, value in os.environ.items()
-            if key not in {"DEEPSEEK_API_KEY", "BASH_ENV", "ENV"}
+            if key not in {"DEEPSEEK_API_KEY", "GLM_API_KEY", "BASH_ENV", "ENV"}
             and not key.startswith(("BASH_FUNC_", "LD_", "DYLD_"))
         }
     try:

@@ -1,5 +1,15 @@
 # 版本记录
 
+## V0.9.2 — Add-新增GLM模型支持
+
+Git 标签：`v0.9.2`。
+
+- 新增 `HARNESS_PROVIDER=auto|deepseek|glm`：默认 `auto` 在 `GLM_API_KEY` 非空时优先 GLM，否则回退 DeepSeek；可强制指定 provider，对应密钥缺失时启动给出明确错误。
+- 将 `DeepSeekClient` 重构为 `ChatCompletionClient(api_key, provider=...)`，保留旧名称作为兼容别名；两个 provider 的模型、端点、超时和错误提示按配置区分。
+- DeepSeek 继续使用 `deepseek-flash` 并关闭思考模式；GLM 使用 `glm-5.3-flash`、启用思考模式，默认 `reasoning_effort=low`。
+- GLM 流式返回的 `prompt_tokens_details.cached_tokens` 归一化为既有账本使用的缓存命中／未命中字段；GLM 官方未核验到明确单价前，配置保留 `0.0 CNY` 占位，token 统计正常、费用按 0 估算。
+- Bash、Hooks 和 MCP 子进程同步清理 `GLM_API_KEY`，启动横幅与帮助文案根据当前 provider 动态显示。
+
 ## V0.9.1 — Add-进度反馈、速度提升
 
 Git 标签：`v0.9.1`。

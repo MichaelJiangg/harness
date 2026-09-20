@@ -121,6 +121,15 @@ _RATES = {
 }
 _SCHEMA = {
     "model": {"name": _text, "endpoint": _endpoint, "request_timeout": _number(0, exclusive=True)},
+    "glm": {
+        "name": _text,
+        "endpoint": _endpoint,
+        "request_timeout": _number(0, exclusive=True),
+        "reasoning_effort": lambda value: value in {"low", "high", "max"},
+        "pricing": {
+            **_RATES, "currency": _text, "source": _text, "checked_at": _text,
+        },
+    },
     "display": {"character_delay": _number(0)},
     "engine": {
         "max_requests": _integer(1), "max_retries": _integer(0),
@@ -237,6 +246,33 @@ def load_api_key(*, env_file=None, environ=None):
 
 def load_tavily_api_key(*, env_file=None, environ=None):
     return load_env_key("TAVILY_API_KEY", env_file=env_file, environ=environ)
+
+
+def load_glm_api_key(*, env_file=None, environ=None):
+    return load_env_key("GLM_API_KEY", env_file=env_file, environ=environ)
+
+
+def select_model_provider(*, env_file=None, environ=None):
+    """按显式配置或 key 可用性选择模型提供商；auto 模式优先 GLM。"""
+    requested = load_env_key(
+        "HARNESS_PROVIDER", env_file=env_file, environ=environ
+    )
+    if requested is not None:
+        requested = requested.strip().lower()
+        if requested not in {"auto", "deepseek", "glm"}:
+            raise ValueError("HARNESS_PROVIDER 只支持 auto、deepseek 或 glm。")
+    deepseek_key = load_api_key(env_file=env_file, environ=environ)
+    glm_key = load_glm_api_key(env_file=env_file, environ=environ)
+    if requested in {"deepseek", "glm"}:
+        provider = requested
+    else:
+        provider = "glm" if glm_key and glm_key.strip() else "deepseek"
+    key = glm_key if provider == "glm" else deepseek_key
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError(
+            "请在项目 .env 或当前进程中设置 DEEPSEEK_API_KEY 或 GLM_API_KEY。"
+        )
+    return provider, key
 
 
 def load_env_key(key_name, *, env_file=None, environ=None):
