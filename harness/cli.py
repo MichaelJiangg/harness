@@ -89,27 +89,18 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 {_format_command_help()}"""
 
 PRODUCT_NAME = "Delin Harness"
-PRODUCT_SUBTITLE = "Powered by Deepseek"
-BRIEF_HELP = """直接输入任务开始：
+PRODUCT_SUBTITLE = "Powered by Codex · v1.0"
+BRIEF_HELP = """Try:
 
 1. 帮我调研 Personal Agent 的国内外竞品，包括 MUSE、Today 等。
 2. 帮我按照五看三定，做一份产品规划。
 3. 帮我做 Agent 的发布页产品设计。
 
-核心能力
-文件读写 · 命令执行 · 网页读取 · 长期记忆
+/mode auto [目录]  减少确认    /memory  会话记忆
+/notes             项目笔记    /cost    用量
+/help              全部命令    /exit    退出
 
-常用命令
-
-/mode auto [目录]   减少重复确认
-/memory             查看会话记忆
-/notes              查看项目笔记
-/cost               查看用量
-/help               完整帮助
-
-输入 /activity 查看后台执行记录
-输入 /mcp 查看外部服务器状态
-输入 /exit 退出"""
+输入 /activity 查看后台执行记录，输入 /mcp 查看外部服务器状态。"""
 
 ACTIVITY_DEFAULT_COUNT = 50
 ACTIVITY_MAX_EVENTS = 500
@@ -1295,6 +1286,29 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 lines.append(f"  {name} — {summary}")
         return "\n".join(lines)
 
+    def format_status():
+        lines = [
+            f"Model      {active_model} ({active_label})",
+            f"Tools      {len(available_tool_definitions)}",
+            f"Mode       {permission_mode}",
+            f"Hooks      {len(hook_manager.hooks)}",
+            f"Memory     {len(memory_records)} entries",
+            f"Notes      {'loaded' if notes_content.strip() else 'empty'}",
+        ]
+        if mcp_manager is not None:
+            lines.append("MCP")
+            for status in mcp_manager.status():
+                state = status["state"]
+                detail = (
+                    f"{status['tool_count']} tools"
+                    if state == "connected"
+                    else (status.get("last_error") or state)
+                )
+                lines.append(f"  {status['name']:<20} {state:<11} {detail}")
+        else:
+            lines.append("MCP        disabled")
+        return "\n".join(lines)
+
     def start_manual_compaction():
         nonlocal worker
         if worker and worker.is_alive():
@@ -1335,6 +1349,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             format_history=format_history,
             format_cost=lambda: format_cost(ledger),
             format_tools=format_tools,
+            status_text=format_status,
             compact=start_manual_compaction,
             help_text=HELP,
             busy=busy,
@@ -1345,14 +1360,30 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             console.print(Panel(
                 Group(
                     Text(PRODUCT_NAME, style="bold cyan", justify="center"),
-                    Text(f"Powered by {active_subtitle}", style="dim", justify="center"),
+                    Text(PRODUCT_SUBTITLE, style="dim", justify="center"),
                 ),
                 border_style="cyan",
                 expand=False,
             ))
+            console.print(
+                Text(
+                    f"Ready · {active_model} · {len(available_tool_definitions)} tools",
+                    style="bold",
+                ),
+            )
+            console.print(Text(f"Workspace  {Path.cwd()}", style="dim"))
+            if memory_enabled:
+                console.print(
+                    Text(f"Memory     {len(memory_records)} entries", style="dim"),
+                )
+            console.print()
             console.print(Text(BRIEF_HELP, style="dim"), soft_wrap=True)
     else:
-        write(f"{PRODUCT_NAME} · Powered by {active_subtitle}\n{BRIEF_HELP}")
+        write(
+            f"{PRODUCT_NAME} · {PRODUCT_SUBTITLE}\n"
+            f"Ready · {active_model} · {len(available_tool_definitions)} tools\n"
+            f"{BRIEF_HELP}"
+        )
     if mcp_manager is not None:
         if mcp_config_source == ".harness/mcp.json":
             write(

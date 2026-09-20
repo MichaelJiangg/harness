@@ -1,5 +1,15 @@
 # 版本记录
 
+## V1.0 — 版本发布
+
+Git 标签：`v1.0`。
+
+- 完成标准 Python 打包配置：新增 setuptools build backend、作者、关键词、分类、包发现和 `harness` 命令行入口；支持 editable install 和 wheel 安装。
+- 新增 `harness --version`；首次实际启动时自动创建带注释的 `.harness/config.toml`，`--help`／`--version` 不产生文件。
+- 安装后的运行时优先读取当前目录 `.env`，再回退源码目录 `.env`，便于 wheel 安装后在任意项目中使用。
+- 首页改为 Claude Code 风格摘要视图：品牌固定为 `Powered by Codex · v1.0`，模型信息动态显示；完整启动检查仅在 `--check` 输出。
+- 新增 `/status`，运行时查看模型、工具、权限、MCP、Hooks、记忆和笔记状态。
+
 ## V0.10.3 — Add-启动流程
 
 Git 标签：`v0.10.3`。

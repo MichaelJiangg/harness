@@ -2,12 +2,14 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `.harness/config.toml`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。V0.9.3 新增本地命令自动发现和终端多行输入：命令处理器按文件注册，`/help` 动态生成；空闲时回车换行、连续两个空行发送，续行显示行号并保留粘贴内容中的内部空行。V0.9.3.1 修复 Esc 中断、readline 行内编辑、单行立即发送与多行识别，并保护输入提示符。第十部分组装与发布已作为 V0.10.1 发布：`harness/app.py` 提供唯一 `create_app()` 组装入口，把启动配置、模型客户端和完整生命周期统一接入。V0.10.2 完成统一配置管理：`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数按 `CLI > 环境变量 > 配置文件 > 默认值` 覆盖内置默认值，`pyproject.toml` 只保留项目元数据。V0.10.3 新增健壮启动流程、`--check` 状态报告和分组工具列表。Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。第八部分 MCP 集成已作为 V0.8 发布：优先读取 `.harness/mcp.json`，无该文件时回退 `.harness/config.toml`，通过 stdio JSON-RPC 启动、发现、调用外部工具，并支持 `/mcp` 状态查询和自动重连。第九部分进度反馈与启动速度优化已作为 V0.9.1 发布：等待模型时显示旋转动画，流式回复继续逐字显示，主查询工具执行显示参数、耗时和结果，MCP 连接改为后台执行并显著缩短启动时间。V0.9.2 新增 DeepSeek 与 GLM 自动切换：`HARNESS_PROVIDER` 支持 `auto`／`deepseek`／`glm`，GLM 使用 OpenAI 兼容端点和思考模式，缓存字段归一化到既有账本。V0.9.3 新增本地命令自动发现和终端多行输入：命令处理器按文件注册，`/help` 动态生成；空闲时回车换行、连续两个空行发送，续行显示行号并保留粘贴内容中的内部空行。V0.9.3.1 修复 Esc 中断、readline 行内编辑、单行立即发送与多行识别，并保护输入提示符。第十部分组装与发布已作为 V0.10.1 发布：`harness/app.py` 提供唯一 `create_app()` 组装入口，把启动配置、模型客户端和完整生命周期统一接入。V0.10.2 完成统一配置管理：`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数按 `CLI > 环境变量 > 配置文件 > 默认值` 覆盖内置默认值，`pyproject.toml` 只保留项目元数据。V0.10.3 新增健壮启动流程、`--check` 状态报告和分组工具列表。V1.0 完成标准 wheel 打包、`harness` 命令入口、首次配置生成和 Claude Code 风格首页。Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.10.3 — Add-启动流程](https://github.com/MichaelJiangg/harness/releases/tag/v0.10.3) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.10.3`。
+最近公开版本为 [V1.0 — 版本发布](https://github.com/MichaelJiangg/harness/releases/tag/v1.0) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v1.0`。
 
 ## 已完成
 
+- 完成打包发布准备：`pyproject.toml` 配置标准 wheel 构建、作者、依赖和 `harness` 入口；首次运行自动创建注释版默认配置，安装说明覆盖 editable 和 wheel 两种方式。全量 602 项离线测试通过，wheel 与 editable 安装均实测通过。
+- 完成首页 Claude Code 风格优化：正常启动只显示动态 `Ready` 摘要，完整模块报告移到 `--check`，新增 `/status` 运行时状态命令。全量 602 项离线测试通过。
 - 完成健壮启动流程：新增 `harness/startup.py` 按依赖顺序检查模块并生成状态报告，可选模块失败降级为警告，必需模块失败才退出；新增 `--check` 非对话检查模式。全量 599 项离线测试通过。
 - 完成统一配置管理：运行时配置迁出 `pyproject.toml`，支持 `.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，按 `CLI > 环境变量 > 配置文件 > 默认值` 解析；新增 `engine.max_turns`、上下文窗口、工具超时和 MCP 列表覆盖。全量 596 项离线测试通过。
 - 完成第十部分组装入口：新增 `harness/app.py`，`create_app()` 加载配置、选择 provider、创建客户端并返回唯一 `start()`；`start()` 统一启用权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染。全量 620 项离线测试通过。
@@ -151,6 +153,7 @@
 
 ## 最近验证
 
+- 2026-09-21：打包发布准备完成后全量 602 项离线测试通过；`python3 -m pip wheel --no-deps .` 生成 `michael_harness-0.10.3-py3-none-any.whl`，独立 venv 安装后 `harness --version` 正常，首次 `--show-config` 自动创建权限为 0600 的注释版配置；editable 安装后 `harness --version` 正常。`compileall` 与 `git diff --check` 通过。
 - 2026-09-20：V0.10.3 已发布。远端 `main` 提交为 `7ab872a6c6b432f9e68a33ab4f74ab9380186a30`，注解标签对象为 `d1e831f304378756f5a02f3d4e5064b80603219e`，标签 `v0.10.3` 指向该提交；Release「V0.10.3 - Add-启动流程」为正式版、非草稿并作为 Latest。
 - 2026-09-20：健壮启动流程完成后全量 599 项离线测试通过，覆盖必需模块失败退出、Hooks／记忆警告降级、MCP 连接失败报告、报告格式和 `--check` 参数；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.10.2 已发布。远端 `main` 提交为 `ec6166b197f964130c00652b951e4abe50a379ba`，注解标签对象为 `9707fb8c806a9d5ec31446c629a0667ff5ccd4a3`，标签 `v0.10.2` 指向该提交；Release「V0.10.2 - Add-统一配置管理」为正式版、非草稿并作为 Latest。

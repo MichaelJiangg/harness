@@ -11,10 +11,10 @@ import shlex
 import tomllib
 from urllib.parse import urlsplit
 
+from . import __version__
 from .permissions import parse_rules
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-CONFIG_FILE = Path.cwd() / ".harness" / "config.toml"
 LEGACY_PROJECT_FILE = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 
@@ -279,6 +279,66 @@ _DEFAULT_SETTINGS = {
 
 _PROCESS_SETTINGS = None
 
+_DEFAULT_CONFIG_TEMPLATE = """\
+# Delin Harness 运行时配置。
+# 此文件只需写需要覆盖的字段；未写的字段使用内置默认值。
+# API 密钥不要写在这里，请放在当前项目 .env 或进程环境变量中。
+
+provider = "auto"
+
+[model]
+# auto 会优先使用 GLM_API_KEY；没有 GLM key 时回退 DEEPSEEK_API_KEY。
+name = "deepseek-flash"
+
+[engine]
+# 单个会话允许的用户轮数上限。
+max_turns = 100
+# 本地上下文字符预算，不等同于模型 token 窗口。
+context_window = 64000
+
+[tools]
+# Bash 工具默认超时时间，单位秒。
+timeout = 30
+
+[mcp]
+enabled = true
+servers = [
+  { name = "tavily", command = "npx", args = ["-y", "tavily-mcp@0.2.22"], env = ["TAVILY_API_KEY=${TAVILY_API_KEY}"] },
+]
+
+# 常用环境变量：
+# HARNESS_PROVIDER=auto|deepseek|glm
+# HARNESS_MODEL=模型名
+# HARNESS_MAX_TURNS=轮数
+# HARNESS_CONTEXT_WINDOW_CHARS=字符数
+# HARNESS_TOOL_TIMEOUT=秒
+"""
+
+
+def default_config_path():
+    return Path.cwd() / ".harness" / "config.toml"
+
+
+def ensure_default_config(path=None):
+    """首次运行时创建带注释的本地配置；永不覆盖已有文件。"""
+    target = default_config_path() if path is None else Path(path)
+    if target.exists():
+        return False
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError:
+        return False
+    except (OSError, ValueError):
+        raise ValueError("无法创建默认配置 .harness/config.toml，请检查目录权限。") from None
+    with os.fdopen(descriptor, "w", encoding="utf-8") as target_file:
+        target_file.write(_DEFAULT_CONFIG_TEMPLATE)
+    return True
+
 
 def _validate_table(value, schema, location="config"):
     if not isinstance(value, dict) or value.keys() != schema.keys():
@@ -330,7 +390,7 @@ def _parse_servers(value):
 
 def load_settings(path=None):
     """读取部分 .harness/config.toml；文件不存在时返回空覆盖。"""
-    path = CONFIG_FILE if path is None else Path(path)
+    path = default_config_path() if path is None else Path(path)
     try:
         with path.open("rb") as source:
             document = tomllib.load(source)
@@ -428,7 +488,16 @@ def clear_process_settings():
 
 
 def parse_cli_args(argv=None):
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(
+        prog="harness",
+        add_help=False,
+        description="Delin Harness — AI Agent Runtime",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"Harness v{__version__}",
+    )
     parser.add_argument("--help", action="store_true")
     parser.add_argument("--config")
     parser.add_argument("--provider", choices=["auto", "deepseek", "glm"])
@@ -508,7 +577,11 @@ def load_env_key(key_name, *, env_file=None, environ=None):
     if key_name in environ:
         return environ[key_name]
 
-    path = ENV_FILE if env_file is None else Path(env_file)
+    if env_file is None:
+        local_file = Path.cwd() / ".env"
+        path = local_file if local_file.exists() else ENV_FILE
+    else:
+        path = Path(env_file)
     try:
         content = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError:

@@ -29,6 +29,7 @@ class CommandContext:
         format_history: Callable[[], str],
         format_cost: Callable[[], str],
         format_tools: Callable[[], str],
+        status_text: Callable[[], str],
         compact: Callable[[], None],
         help_text: str,
         busy: bool,
@@ -43,6 +44,7 @@ class CommandContext:
         self.format_history = format_history
         self.format_cost = format_cost
         self.format_tools = format_tools
+        self.status_text = status_text
         self.compact = compact
         self.help_text = help_text
         self.busy = busy

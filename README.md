@@ -2,16 +2,31 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.10.3 — Add-启动流程**（Git 标签 `v0.10.3`）。新增健壮启动检查、`--check` 状态报告和分组工具列表。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V1.0 — 版本发布**（Git 标签 `v1.0`）。完成标准 wheel 打包、`harness` 命令入口、首次配置生成和 Claude Code 风格首页。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
-## 启动
+## 安装
 
-从 GitHub 下载项目并进入目录：
+需要 Python 3.11 或更新版本。从源码安装：
 
 ```sh
 git clone https://github.com/MichaelJiangg/harness.git
 cd harness
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e .
+harness --version
 ```
+
+也可以构建并安装标准 wheel：
+
+```sh
+python3 -m pip wheel --no-deps .
+python3 -m pip install michael_harness-*.whl
+```
+
+安装后会获得 `harness` 命令。首次实际启动时，如果当前目录没有 `.harness/config.toml`，Harness 会自动创建带注释的默认配置；`--help` 和 `--version` 不会产生文件。
+
+## 配置
 
 首次使用，在项目根目录创建 `.env` 并填写密钥（该文件不会随仓库发布）。以下示例同时保留 DeepSeek 和 GLM，未填写的 provider 会被自动跳过：
 
@@ -23,11 +38,11 @@ TAVILY_API_KEY=你的Tavily密钥
 HARNESS_PROVIDER=auto
 ```
 
-之后每次在项目目录直接运行：
+之后在项目目录直接运行：
 
 ```sh
-python3 -m pip install "rich>=13.0"
-python3 -m harness
+harness --check
+harness
 ```
 
 启动时自动读取项目根目录 `.env`，无需每次 `export`。如果当前进程已设置 `DEEPSEEK_API_KEY`、`GLM_API_KEY` 或 `HARNESS_PROVIDER`，环境变量优先于文件（包括已设置的空值）。支持单行值、单／双引号、注释和可选 `export` 前缀，不执行 shell 命令或变量插值；仅读取这些键，不注入其他变量。`.gitignore` 已排除 `.env*`，不要将真实密钥提交到 Git。
@@ -68,6 +83,7 @@ python3 -m harness
 | `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
 | `/activity [latest\|all\|clear]` | 查看后台工具、请求、压缩和编排活动 |
 | `/mcp` | 查看外部 MCP 服务器连接状态和工具数量 |
+| `/status` | 查看当前模型、工具、权限、MCP、Hooks、记忆和笔记状态 |
 | `/exit` | 退出，停止后续模型和工具调用 |
 
 `python3 -m harness --help` 无需密钥即可查看帮助。支持单条管道输入，输入流结束后会等待回答；交互中一次处理一个问题，繁忙时的新问题会被提示稍后重发。

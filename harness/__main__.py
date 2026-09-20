@@ -2,6 +2,7 @@ import sys
 
 from .config import (
     cli_overrides_from_args,
+    ensure_default_config,
     parse_cli_args,
     resolve_settings,
     set_process_settings,
@@ -11,6 +12,11 @@ from .config import (
 def main():
     try:
         args = parse_cli_args(sys.argv[1:])
+        first_run = False
+        if args.config is None and not args.help:
+            first_run = ensure_default_config()
+            if first_run:
+                print("First run detected — creating default config at .harness/config.toml")
         set_process_settings(resolve_settings(
             config_file=args.config,
             cli_overrides=cli_overrides_from_args(args),
@@ -28,14 +34,14 @@ def main():
                 print(f"  {key}={value}")
             return 0
         app = create_app(provider=args.provider, model=args.model)
-        from .startup import check_startup, format_startup_report
-
-        report_items, warnings = check_startup(
-            client=app.client,
-            check_mcp=args.check,
-        )
-        print(format_startup_report(report_items, warnings, check_mode=args.check))
         if args.check:
+            from .startup import check_startup, format_startup_report
+
+            report_items, warnings = check_startup(
+                client=app.client,
+                check_mcp=True,
+            )
+            print(format_startup_report(report_items, warnings, check_mode=True))
             return 0
         app()
     except ValueError as error:

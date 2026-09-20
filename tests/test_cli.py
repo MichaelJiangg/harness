@@ -191,9 +191,9 @@ class CLITests(unittest.TestCase):
     def test_new_commands_are_auto_discovered_and_listed_in_help(self):
         names = {entry.name for entry in command_entries()}
         self.assertTrue({
-            "/clear", "/history", "/model", "/cost", "/compact", "/tools", "/help",
+            "/clear", "/history", "/model", "/cost", "/compact", "/tools", "/help", "/status",
         }.issubset(names))
-        for name in ("/clear", "/history", "/model", "/tools"):
+        for name in ("/clear", "/history", "/model", "/tools", "/status"):
             self.assertIn(name, HELP)
 
     def test_clear_resets_conversation_before_the_next_question(self):
@@ -284,6 +284,23 @@ class CLITests(unittest.TestCase):
         self.assertIn("文件与搜索", text)
         self.assertIn("命令与验证", text)
         self.assertIn("编排", text)
+        client.complete.assert_not_called()
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_status_command_reports_runtime_state_without_model_request(self):
+        client = Mock()
+        output = StringIO()
+        errors = StringIO()
+        run_cli(
+            client,
+            input_stream=StringIO("/status\n/exit\n"),
+            output=output,
+            error_output=errors,
+        )
+        text = output.getvalue()
+        self.assertIn("Model", text)
+        self.assertIn("Tools", text)
+        self.assertIn("Mode", text)
         client.complete.assert_not_called()
         self.assertEqual(errors.getvalue(), "")
 
@@ -651,6 +668,7 @@ class CLITests(unittest.TestCase):
         environment = os.environ.copy()
         # 显式空值可避免测试读取用户本机 .env 中的真实密钥。
         environment["DEEPSEEK_API_KEY"] = ""
+        environment["GLM_API_KEY"] = ""
         result = subprocess.run(
             [sys.executable, "-m", "harness"],
             cwd=Path(__file__).resolve().parents[1],
