@@ -1,5 +1,12 @@
 # 版本记录
 
+## V1.0.1 — bugfix
+
+Git 标签：`v1.0.1`。
+
+- 调整 auto provider 策略：DeepSeek 与 GLM 任一有 key 即可使用，两者都有时优先 DeepSeek，都没有时明确报错。
+- `/model` 增加切换示例，显性展示 `/model deepseek` 和 `/model glm`。
+
 ## V1.0 — 版本发布
 
 Git 标签：`v1.0`。

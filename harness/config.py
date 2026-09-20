@@ -287,7 +287,7 @@ _DEFAULT_CONFIG_TEMPLATE = """\
 provider = "auto"
 
 [model]
-# auto 会优先使用 GLM_API_KEY；没有 GLM key 时回退 DEEPSEEK_API_KEY。
+# auto 优先使用 DEEPSEEK_API_KEY；没有 DeepSeek key 时回退 GLM_API_KEY。
 name = "deepseek-flash"
 
 [engine]
@@ -550,7 +550,7 @@ def load_glm_api_key(*, env_file=None, environ=None):
 
 
 def select_model_provider(*, env_file=None, environ=None):
-    """按显式配置或 key 可用性选择模型提供商；auto 模式优先 GLM。"""
+    """auto 模式优先 DeepSeek；只有一个 key 时使用该 provider。"""
     requested = load_env_key(
         "HARNESS_PROVIDER", env_file=env_file, environ=environ
     )
@@ -563,7 +563,12 @@ def select_model_provider(*, env_file=None, environ=None):
     if requested in {"deepseek", "glm"}:
         provider = requested
     else:
-        provider = "glm" if glm_key and glm_key.strip() else "deepseek"
+        if deepseek_key and deepseek_key.strip():
+            provider = "deepseek"
+        elif glm_key and glm_key.strip():
+            provider = "glm"
+        else:
+            provider = "deepseek"
     key = glm_key if provider == "glm" else deepseek_key
     if not isinstance(key, str) or not key.strip():
         raise ValueError(

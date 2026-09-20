@@ -8,6 +8,10 @@ def handle(context, arguments):
         context.write("Available models:")
         for name, details in context.available_models.items():
             context.write(f"  {name} — {details['model']} ({details['label']})")
+        context.write("")
+        context.write("切换示例：")
+        context.write("  /model deepseek")
+        context.write("  /model glm")
         return
     if len(arguments) != 1 or arguments[0] not in context.available_models:
         context.write("用法：/model [deepseek|glm]")

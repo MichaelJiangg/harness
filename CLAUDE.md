@@ -10,7 +10,7 @@
 
 - 使用 Python 3.11 或更新版本；查询循环、文件与命令工具、记忆和笔记核心使用标准库，终端渲染依赖 `rich>=13.0`。
 - `pyproject.toml` 只保存项目元信息、依赖和仓库地址。Harness 运行配置来自内置默认值、`.harness/config.toml`、`HARNESS_*` 环境变量和 CLI 参数，最终按 `CLI > 环境变量 > 配置文件 > 默认值` 解析；`harness/config.py` 严格校验并缓存启动快照，配置缺失时使用默认值，配置错误时停止启动。
-- `config.toml` 的 `[model]` 定义 DeepSeek 默认配置，`[glm]` 定义 GLM 配置。`HARNESS_PROVIDER`／`--provider` 支持 `auto`／`deepseek`／`glm`；默认 `auto` 在 `GLM_API_KEY` 非空时优先 GLM，否则回退 DeepSeek，两个密钥都没有时启动报错。
+- `config.toml` 的 `[model]` 定义 DeepSeek 默认配置，`[glm]` 定义 GLM 配置。`HARNESS_PROVIDER`／`--provider` 支持 `auto`／`deepseek`／`glm`；默认 `auto` 优先 DeepSeek，缺少 DeepSeek key 时使用 GLM，两个密钥都没有时启动报错。
 - `harness/app.py` 是唯一组装入口，只负责 `get_settings()`、provider 选择和 `ChatCompletionClient` 创建，并返回 `start()`。工具权限、内置与 MCP 工具、记忆、笔记、Hooks、Agent 编排和终端渲染继续由 `run_cli` 在既有生命周期中连接；组装层不得复制这些初始化逻辑。
 - `harness/startup.py` 按配置、查询引擎、内置工具、MCP、权限、Hooks、记忆、终端的顺序生成启动报告。配置、客户端和内置工具为必需模块，失败时抛 `StartupFailure`；Hooks、记忆和非关键 MCP 失败降级为警告。`--check` 只运行报告并执行有界 MCP 连接检查，不进入对话模式。
 - `harness/permissions.py` 统一执行 `allow`、`ask`、`deny` 决策。`PermissionRule` 提供精确工具名、`action`、整数 `priority`（默认 0），以及可选 `directory` 或 `command_pattern`；配置放在 `[permissions.rules]`。工具级 `deny` 先拒绝，规则列表按禁止规则优先、数值优先级降序、同级声明顺序排列；`check_permission` 逐条匹配，第一条命中即返回，没有命中则沿用工具级配置及风险等级默认策略。未配置的新工具默认询问。

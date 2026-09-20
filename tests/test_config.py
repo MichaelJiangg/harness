@@ -49,7 +49,7 @@ class ConfigTests(unittest.TestCase):
         with patch.object(Path, "read_text", return_value='TAVILY_API_KEY="file-tavily"' ):
                     self.assertEqual(config.load_tavily_api_key(environ={}), "file-tavily")
 
-    def test_model_provider_auto_prefers_glm_and_falls_back_to_deepseek(self):
+    def test_model_provider_auto_prefers_deepseek_and_falls_back_to_glm(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
             path.write_text(
@@ -58,12 +58,17 @@ class ConfigTests(unittest.TestCase):
             )
             self.assertEqual(
                 config.select_model_provider(env_file=path, environ={}),
-                ("glm", "glm-test"),
+                ("deepseek", "deepseek-test"),
             )
             path.write_text("DEEPSEEK_API_KEY=deepseek-test\n", encoding="utf-8")
             self.assertEqual(
                 config.select_model_provider(env_file=path, environ={}),
                 ("deepseek", "deepseek-test"),
+            )
+            path.write_text("GLM_API_KEY=glm-test\n", encoding="utf-8")
+            self.assertEqual(
+                config.select_model_provider(env_file=path, environ={}),
+                ("glm", "glm-test"),
             )
 
     def test_model_provider_can_be_forced_and_validated(self):

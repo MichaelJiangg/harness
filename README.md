@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型支持 DeepSeek 与 GLM 自动切换。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V1.0 — 版本发布**（Git 标签 `v1.0`）。完成标准 wheel 打包、`harness` 命令入口、首次配置生成和 Claude Code 风格首页。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V1.0.1 — bugfix**（Git 标签 `v1.0.1`）。修复 auto provider 优先级并增强模型切换提示。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 安装
 
@@ -49,7 +49,7 @@ harness
 
 | `HARNESS_PROVIDER` | 行为 |
 | --- | --- |
-| `auto`（默认） | `GLM_API_KEY` 非空时使用 GLM，否则回退 DeepSeek；两者都没有时启动报错 |
+| `auto`（默认） | 优先使用 DeepSeek；没有 DeepSeek key 时使用 GLM；两者都没有时启动报错 |
 | `deepseek` | 强制使用 DeepSeek，缺少 `DEEPSEEK_API_KEY` 时启动报错 |
 | `glm` | 强制使用 GLM，缺少 `GLM_API_KEY` 时启动报错 |
 
@@ -72,7 +72,7 @@ harness
 | `/help` | 显示帮助和所有可用命令 |
 | `/clear` | 清空当前对话，保留项目笔记、记忆和已激活技能 |
 | `/history` | 显示当前对话历史 |
-| `/model [deepseek\|glm]` | 查看当前模型，或切换 DeepSeek／GLM |
+| `/model [deepseek\|glm]` | 查看当前模型和切换示例，或切换 DeepSeek／GLM |
 | `/cost` | 查询本次会话用量、USD 预估费用和逐请求明细，不调用模型；等待回答时也可使用 |
 | `/compact` | 空闲时让模型总结旧对话，保留最近几轮；摘要请求计入 `/cost` |
 | `/tools` | 查看当前可用的内置和外部 MCP 工具 |
