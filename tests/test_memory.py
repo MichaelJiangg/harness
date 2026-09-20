@@ -268,7 +268,7 @@ class MemoryCLITests(unittest.TestCase):
         self.assertEqual([record["id"] for record in records], ["1", "2"])
         self.assertEqual(records[-1]["summary"], "项目确定使用 FastAPI 和 PostgreSQL。")
         self.assertEqual(ledger.summary()["requests"], 2)
-        self.assertIn("[memory] 已保存本次会话摘要 #2", output.getvalue())
+        self.assertIn("[hook] session_end: saved 1 memory entry #2", output.getvalue())
         self.assertEqual(errors.getvalue(), "")
 
     def test_memory_is_opt_in_for_embedded_cli(self):

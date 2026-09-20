@@ -44,6 +44,8 @@
 - `harness/memory/search.py` 提供可选向量召回：安装 ChromaDB 时按语义相似度检索，未安装时用字符 bigram 和话题匹配的文本召回；`/recall` 可手动搜索并显示相关度。向量依赖不可用时，系统继续注入最近 N 条基础记忆。
 - 记忆注入固定顺序为项目笔记、最近会话、冷记忆；总量按字符上限裁剪，冷记忆先裁，其次是最旧会话，项目笔记不裁剪。
 - `harness/hooks.py` 从 `.harness/hooks.json` 加载生命周期 Hooks，事件包括会话开始／结束、发送消息前后和工具执行前后；支持 shell、prompt、python，工具事件对主查询和子 Agent 统一生效。
+- `harness/skills.py` 从 `.harness/skills/*.json` 加载技能包，`/skill` 查看、激活和停用；激活后只向当前查询开放技能声明的工具，并注入技能提示词。
+- `harness/presets.py` 提供默认启用的项目约定、写后格式化和会话记忆预置钩子；开关位于 `tool.harness.presets`，格式化优先使用 ruff/black 和本地 prettier。
 - 记忆默认只在 `python3 -m harness` 的 CLI 启动入口启用，`run_cli` 嵌入调用默认保持关闭，避免测试或第三方嵌入在退出时产生意外的模型请求。
 - `harness/notes.py` 管理工作区根目录的 `HARNESS.md` 项目长期笔记：CLI 启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看和更新。固定只操作根目录单个 Markdown 文件，不接收用户路径，最大 65536 字节，拒绝软链接、目录、二进制和越界；追加默认放行，整篇替换默认询问，`deny` 始终优先。
 - `/notes` 查看笔记，`/notes append <text>` 追加，`/notes replace --yes <text>` 和 `/notes clear --yes` 显式确认后更新；项目笔记默认只在 CLI 启动入口启用，嵌入调用保持关闭。

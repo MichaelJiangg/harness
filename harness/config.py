@@ -107,6 +107,11 @@ _SCHEMA = {
     "swarm": {
         "max_requests": _integer(1), "max_role_requests": _integer(1),
     },
+    "presets": {
+        "project_conventions": lambda value: type(value) is bool,
+        "auto_format": lambda value: type(value) is bool,
+        "session_memory": lambda value: type(value) is bool,
+    },
     "context": {
         "max_chars": _integer(1), "summary_chars": _integer(1),
         "keep_recent_turns": _integer(0), "max_compactions": _integer(0),

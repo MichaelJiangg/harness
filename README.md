@@ -2,7 +2,7 @@
 
 一个类似 Claude Code 核心查询循环的最小命令行实现，模型使用 DeepSeek。Python 3.11+；查询、工具、记忆和笔记核心继续使用标准库，终端渲染使用 `rich`。
 
-最近发布：**V0.7.1 — Add-钩子机制**（Git 标签 `v0.7.1`）。在 V0.6.3.1 智能记忆基础上增加生命周期 Hooks 配置。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
+最近发布：**V0.7.2 — Add-Hooks And Skill**（Git 标签 `v0.7.2`）。在 Hooks 基础上增加技能包和预置钩子。版本记录见 [CHANGELOG.md](CHANGELOG.md) 。
 
 ## 启动
 
@@ -48,6 +48,7 @@ DeepSeek > README 介绍了这个查询引擎的使用方式……
 | `/mode ask|auto [目录]` | 切换权限模式；auto 模式信任当前或指定工作目录 |
 | `/memory [list\|show <id>\|delete <id> --yes\|clear --yes]` | 查看和管理本地会话记忆 |
 | `/recall <query> [--limit N\|--threshold T]` | 搜索语义相关的历史会话记忆 |
+| `/skill [list\|off\|<技能名>]` | 查看、激活和停用技能包 |
 | `/notes [append <text>\|replace --yes <text>\|clear --yes]` | 查看和编辑项目长期笔记 |
 | `/activity [latest\|all\|clear]` | 查看后台工具、请求、压缩和编排活动 |
 | `/help` | 查看帮助 |
@@ -162,6 +163,42 @@ TAVILY_API_KEY=你的Tavily密钥
 
 Shell Hook 的环境会清除 DeepSeek/Tavily 密钥，并注入 `HARNESS_EVENT`、`HARNESS_WORKSPACE`、`HARNESS_TOOL`。Hook 异常不会中止查询。
 
+## Skills
+
+技能包放在当前工作区 `.harness/skills/`，每个技能一个 JSON 文件；支持 `.json` 和 `.skill` 后缀：
+
+```json
+{
+  "name": "code-review",
+  "description": "代码审查：分析代码质量和潜在问题",
+  "prompt": "以 Reviewer 身份审查代码，输出结构化问题和修改建议。",
+  "tools": ["read_file", "grep", "notes_append"]
+}
+```
+
+```text
+/skill
+/skill code-review
+/skill off
+```
+
+激活后，技能提示词会注入系统提示，当前查询只开放技能声明的工具。
+
+## 预置钩子
+
+默认启用以下内置钩子，可在 `pyproject.toml` 中关闭：
+
+```toml
+[tool.harness.presets]
+project_conventions = true
+auto_format = true
+session_memory = true
+```
+
+- `project_conventions`：启动时加载 `HARNESS.md`。
+- `auto_format`：写入 Python 文件后优先运行 `ruff format`，其次 `black`；前端文件在项目存在本地 prettier 时运行 prettier。
+- `session_memory`：退出时保存本次会话摘要。
+
 ## 项目配置
 
 项目根目录的 `pyproject.toml` 集中管理元信息及非密钥默认配置。启动时通过 Python 标准库 `tomllib` 读取、验证并保存快照，修改配置后重启生效。配置文件位置固定在 Harness 源码根目录，不会从所操作的其他目录加载同名文件；当前仍使用 `python3 -m harness` 从源码运行。
@@ -175,6 +212,7 @@ Shell Hook 的环境会清除 DeepSeek/Tavily 密钥，并注入 `HARNESS_EVENT`
 | `[tool.harness.background]` | 后台任务并发上限与默认超时 |
 | `[tool.harness.security]` | 默认权限模式与 auto 模式信任目录 |
 | `[tool.harness.swarm]` | Swarm 团队总请求上限与单角色请求上限 |
+| `[tool.harness.presets]` | 项目约定、写后格式化、会话记忆三个预置钩子的开关 |
 | `[tool.harness.context]` | 上下文与摘要长度、保留轮数、压缩次数、工具结果长度 |
 | `[tool.harness.tools]` 及其 `bash`、`grep` 子表 | 文件大小、命令超时与输出、搜索条数与长度限制 |
 | `[tool.harness.pricing]` 及其 `peak` 子表 | 现有费率、币种、核验信息及 UTC 高峰时段 |
@@ -551,6 +589,8 @@ V0.5 提供三种编排方式：
 | `harness/memory/` | 本地 JSON 记忆、启动注入、退出摘要和记忆命令；`session.py` 保存核心，`injection.py` 负责上下文注入 |
 | `harness/memory/search.py` | 可选 ChromaDB 向量召回、文本降级和 `/recall` 相关度计算 |
 | `harness/hooks.py` | 加载并执行会话、消息和工具生命周期 Hooks |
+| `harness/skills.py` | 加载、列出和激活 `.harness/skills/*.json` 技能包 |
+| `harness/presets.py` | 项目约定、写后格式化和会话记忆预置逻辑 |
 | `harness/notes.py` | HARNESS.md 读取、注入、追加、替换和路径保护 |
 | `harness/context.py` | 字符预算、完整轮次切分、摘要资料和工具结果截断 |
 | `harness/tools/definition.py` | `ToolDefinition`、取消能力及 DeepSeek 格式转换 |

@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
+第五部分 Agent 编排已作为 V0.5 系列发布：主 AI 通过 `delegate` 启动同步独立子查询，通过 `background_submit` 把慢任务放入会话级后台队列，或通过 `swarm` 让 Coder、Reviewer、Tester 等角色按交接协议接力；V0.5.1 新增 `ask`／`auto` 权限模式，并继续优化管道、重定向、heredoc 和验证脚本放行。第六部分记忆系统已作为 V0.6 系列发布：CLI 启动注入最近会话摘要，正常退出时提取并保存本次会话摘要，`/memory` 支持查看和显式确认后删除；同时增加 `HARNESS.md` 项目长期笔记，启动注入并允许模型追加，`/notes` 支持本地查看和编辑。V0.6.1 使用 `rich` 重构交互终端输出；V0.6.2 优化启动页品牌和示例；V0.6.3.1 增加可选 ChromaDB 语义召回、`/recall` 和按优先级分层注入；V0.7.1 增加生命周期 Hooks；V0.7.2 增加技能包和预置钩子。项目配置集中到 `pyproject.toml`，Python 最低版本为 3.11，查询引擎保留流式显示、上下文压缩、截断、重试和用量统计。
 
-最近公开版本为 [V0.7.1 — Add-钩子机制](https://github.com/MichaelJiangg/harness/releases/tag/v0.7.1) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.7.1`。
+最近公开版本为 [V0.7.2 — Add-Hooks And Skill](https://github.com/MichaelJiangg/harness/releases/tag/v0.7.2) ，仓库为 [MichaelJiangg/harness](https://github.com/MichaelJiangg/harness) ，标签为 `v0.7.2`。
 
 ## 已完成
 
@@ -110,6 +110,8 @@
 - 新增可选语义记忆召回：安装 ChromaDB 后按当前问题检索历史摘要，未安装时退回最近 N 条并保留文本召回；新增 `/recall` 命令和记忆 `key_points` 字段。
 - 记忆注入采用项目笔记、最近会话、冷记忆三层顺序，并按字符预算优先裁剪冷记忆和最旧会话，项目笔记不裁剪。
 - 新增生命周期 Hooks：从 `.harness/hooks.json` 加载 shell、prompt 和 python 逻辑，覆盖会话、消息和工具六个事件点，并统一作用于主查询与子 Agent。
+- 新增技能包系统：从 `.harness/skills/*.json` 加载提示词与工具列表，`/skill` 查看和激活，激活后限制当前查询工具并注入技能提示。
+- 新增默认启用的预置钩子：项目约定加载、写后自动格式化、会话结束保存记忆；可在 `tool.harness.presets` 中关闭。
 - 新增 `harness/notes.py` 和工作区根目录 `HARNESS.md`：启动时读取并注入系统提示，模型通过 `notes_read`、`notes_append`、`notes_replace` 查看、追加和替换长期项目知识；固定单文件、最多 65536 字节，拒绝软链接、目录和二进制内容。
 - CLI 新增 `/notes`、`/notes append <text>`、`/notes replace --yes <text>` 和 `/notes clear --yes`；追加默认放行，整篇替换默认询问，`deny` 始终优先。项目笔记默认只在 CLI 启动入口启用。
 
@@ -130,6 +132,8 @@
 
 ## 最近验证
 
+- 2026-09-20：预置钩子完成后全量 576 项离线测试通过，覆盖配置开关、ruff/black 选择、无格式化器降级和会话记忆提示。
+- 2026-09-20：Skills 完成后全量 574 项离线测试通过，覆盖技能加载、列表、激活、工具限制、提示词注入和 `.skill` 后缀。
 - 2026-09-20：V0.7.1 已发布。远端 `main` 提交为 `600a43667f58774efab4fb87216ae7786c4991cd`，注解标签对象为 `c289510cb2a79e02f669825c9621e74792fc0dc2`，标签 `v0.7.1` 指向该提交；Release「V0.7.1 - Add-钩子机制」为正式版、非草稿并作为 Latest。远端发布树与本地 96 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：Hooks 机制完成后全量 570 项离线测试通过，覆盖配置加载、shell/prompt/python 执行、会话事件、消息提示注入和工具前后钩子。
 - 2026-09-20：V0.6.3.1 已发布。远端 `main` 提交为 `80650ea36a784698bb1f0ebe73c2f90de29b0c64`，注解标签对象为 `16eead4370bfe2e66e3c4f2dabe00da4efc5b174`，标签 `v0.6.3.1` 指向该提交；Release「V0.6.3.1 - Add-智能搜索、记忆注入」为正式版、非草稿并作为 Latest。远端发布树与本地 94 个 blob 的路径、mode 和 SHA 逐项一致。

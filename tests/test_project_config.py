@@ -38,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
         document = config.tomllib.loads(self.source)
         project = document["project"]
         self.assertEqual(project["name"], "harness")
-        self.assertEqual(project["version"], "0.7.1")
+        self.assertEqual(project["version"], "0.7.2")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertEqual(project["dependencies"], ["rich>=13.0"])
         self.assertEqual(project["readme"], "README.md")
@@ -57,6 +57,11 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(settings["background"], {"max_concurrent": 5, "default_timeout": 300})
         self.assertEqual(settings["security"], {"mode": "ask", "auto_directories": []})
         self.assertEqual(settings["swarm"], {"max_requests": 120, "max_role_requests": 40})
+        self.assertEqual(settings["presets"], {
+            "project_conventions": True,
+            "auto_format": True,
+            "session_memory": True,
+        })
         self.assertEqual(settings["context"], {
             "max_chars": 64000, "summary_chars": 2000, "keep_recent_turns": 4,
             "max_compactions": 6, "tool_result_chars": 12000,

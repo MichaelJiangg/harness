@@ -24,7 +24,9 @@ from .memory import (
 )
 from .notes import NotesStore, notes_system_prompt
 from .permissions import PermissionPolicy, SessionPermissionCache, get_risk_level
-from .tools import create_tool_executor
+from .presets import format_written_file
+from .skills import SkillManager, format_skill_list
+from .tools import create_tool_executor, get_tool_definitions
 from .tools.bash import DEFAULT_TIMEOUT, MAX_TIMEOUT
 from .tools.swarm import DEFAULT_ROLES as DEFAULT_SWARM_ROLES
 from .usage import UsageLedger, format_cost, format_usage
@@ -44,6 +46,7 @@ HELP = f"""输入问题开始查询，默认可直接读取和搜索文件；工
 /mode ask|auto [目录]  切换权限模式；auto 模式信任当前或指定工作目录，危险操作仍确认
 /memory [list|show <id>|delete <id> --yes|clear --yes]  查看和管理本地会话记忆
 /recall <query> [--limit N] [--threshold T]  按语义搜索历史会话记忆
+/skill [list|off|<技能名>]  查看和激活可复用技能包
 /notes [append <text>|replace --yes <text>|clear --yes]  查看和编辑项目长期笔记
 /activity [latest|all|clear]  查看后台工具、请求和编排活动
 /cost  查看本次会话 token、USD 预估费用及逐请求明细
@@ -83,6 +86,9 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             hooks_enabled=False, hooks_manager=None):
     if character_delay is None:
         character_delay = get_settings()["display"]["character_delay"]
+    presets = get_settings()["presets"]
+    memory_enabled = memory_enabled and presets["session_memory"]
+    notes_enabled = notes_enabled and presets["project_conventions"]
     ledger = ledger if ledger is not None else UsageLedger()
     input_stream = input_stream if input_stream is not None else sys.stdin
     output = output if output is not None else sys.stdout
@@ -133,6 +139,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         hook_manager = HookManager(Path.cwd())
     else:
         hook_manager = HookManager(Path("/__harness_hooks_disabled__"))
+    skill_manager = SkillManager(Path.cwd())
     hook_start_result = hook_manager.run("session_start", {})
     base_system_content = notes_system_prompt(SYSTEM_PROMPT, notes_content)
     if hook_start_result.prompts:
@@ -168,6 +175,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     prompt_shown = False
     input_closed = False
     session_ended = False
+    active_skill = None
 
     def show_prompt():
         nonlocal prompt_shown
@@ -360,9 +368,12 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             )
             if vector_store is not None:
                 vector_store.sync([record])
-            write(f"[memory] 已保存本次会话摘要 #{record['id']}。")
+            write(
+                f"[hook] session_end: saved 1 memory entry #{record['id']}",
+                style="magenta",
+            )
         except Exception as error:
-            write(f"[memory] 保存会话摘要失败：{error}", error=True)
+            write(f"[hook] session_end: save memory failed: {error}", error=True)
 
     def handle_memory_command(text):
         try:
@@ -531,9 +542,58 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             format_recall_result(record, score) for record, score in matched
         ))
 
+    def handle_skill_command(text):
+        nonlocal active_skill
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            write("用法：/skill [list|off|<技能名>]")
+            return
+        if len(parts) == 1 or parts[1:] == ["list"]:
+            write(format_skill_list(skill_manager.list()))
+            for error in skill_manager.load_errors:
+                write(f"[skill] {error}", error=True)
+            return
+        if parts[1:] == ["off"]:
+            if active_skill is None:
+                write("当前没有激活技能。")
+            else:
+                write(f"[skill] Deactivated: {active_skill.name}")
+                active_skill = None
+            return
+        if len(parts) == 2:
+            skill = skill_manager.activate(parts[1])
+            if skill is None:
+                write(f"未找到技能：{parts[1]}。输入 /skill 查看可用技能。")
+                return
+            available_names = {
+                item["function"]["name"] for item in get_tool_definitions()
+            }
+            missing = [name for name in skill.tools if name not in available_names]
+            if missing:
+                write(f"[skill] 技能工具不可用：{'、'.join(missing)}")
+                return
+            active_skill = skill
+            write(f"[skill] Activated: {skill.name}")
+            write(f"[skill] Loading prompt + tools: {'、'.join(skill.tools)}")
+            return
+        write("用法：/skill [list|off|<技能名>]")
+
     def inject_memory_for_query(query):
         nonlocal messages
+        query_base = base_system_content
+        if active_skill is not None:
+            query_base += (
+                "\n\n## 当前激活技能\n"
+                f"技能名称：{active_skill.name}\n"
+                f"技能说明：{active_skill.description}\n"
+                f"技能提示：\n{active_skill.prompt}"
+            )
         if not semantic_memory or vector_store is None:
+            if active_skill is not None:
+                messages[0]["content"] = memory_system_prompt(
+                    query_base, memory_records,
+                )
             return
         try:
             records = memory_store.records()
@@ -545,7 +605,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             matched = []
         recent = memory_records[-5:]
         messages[0]["content"] = memory_system_prompt(
-            base_system_content, recent, cold_records=matched,
+            query_base, recent, cold_records=matched,
         )
 
     def confirm_tool(name, arguments, workspace):
@@ -758,6 +818,21 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             for error in event.get("errors", []):
                 write(f'[hook] {event.get("event", "")}: {error}', error=True)
             return
+        if (event["type"] == "tool" and event["name"] == "write_file"
+                and event.get("result", {}).get("status") == "success"
+                and presets["auto_format"]):
+            path = event["result"].get("path")
+            if isinstance(path, str):
+                try:
+                    formatter = format_written_file(Path.cwd(), path)
+                except Exception as error:
+                    write(f"[hook] post_tool_call: format failed: {error}", error=True)
+                else:
+                    if formatter:
+                        write(
+                            f"[hook] post_tool_call: auto-formatted {path} with {formatter}",
+                            style="magenta",
+                        )
         hidden_types = {
             "tool", "usage", "compact_start", "compact_done", "compact_skipped",
         }
@@ -887,6 +962,10 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         else:
             write("[memory] 向量搜索不可用，退回到最近记忆模式。", style="dim")
     report_hook_result("session_start", hook_start_result)
+    if notes_enabled and notes_content.strip():
+        write("[hook] session_start: loaded project conventions", style="magenta")
+    if memory_enabled and memory_records:
+        write(f"[hook] session_start: loaded {len(memory_records)} memory entries", style="magenta")
     if hook_manager.load_error:
         write(f"[hook] 配置加载失败：{hook_manager.load_error}", error=True)
     if memory_load_error:
@@ -946,6 +1025,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 write("上一轮查询进行中，暂时无法管理项目笔记；期间可以输入 /cost。")
             elif text.startswith("/notes"):
                 handle_notes_command(text)
+            elif text.startswith("/skill"):
+                handle_skill_command(text)
             elif text.startswith("/recall"):
                 handle_recall_command(text)
             elif text.startswith("/activity"):
@@ -974,10 +1055,18 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 inject_memory_for_query(text)
                 turn += 1
                 compact = text == "/compact"
+                query_tools = get_tool_definitions()
+                if active_skill is not None:
+                    allowed = set(active_skill.tools)
+                    query_tools = [
+                        tool for tool in query_tools
+                        if tool["function"]["name"] in allowed
+                    ]
                 state = QueryState(
                     client=client, ledger=ledger, turn=turn, abort=abort, on_event=on_event,
                     tool_executor=tool_executor,
                     hooks=hook_manager,
+                    tools=query_tools,
                     messages=deepcopy(messages) + ([] if compact else [{"role": "user", "content": text}]),
                 )
                 worker = Thread(target=run_query, args=(state,), kwargs={"compact": compact}, daemon=True)

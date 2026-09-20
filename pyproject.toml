@@ -1,6 +1,6 @@
 [project]
 name = "harness"
-version = "0.7.1"
+version = "0.7.2"
 description = "A Python query engine with DeepSeek and a local tool system."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,11 @@ auto_directories = []
 [tool.harness.swarm]
 max_requests = 120
 max_role_requests = 40
+
+[tool.harness.presets]
+project_conventions = true
+auto_format = true
+session_memory = true
 
 [tool.harness.context]
 max_chars = 64000
