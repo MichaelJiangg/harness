@@ -145,6 +145,7 @@
 
 ## 最近验证
 
+- 2026-09-20：V0.9.2 已发布。远端 `main` 提交为 `460914283dc92b116470bb4ae1912c895df299c5`，注解标签对象为 `dde5ff7d936d8da42ff364287f955c33886ca0c4`，标签 `v0.9.2` 指向该提交；Release「V0.9.2 - Add-新增GLM模型支持」为正式版、非草稿并作为 Latest。
 - 2026-09-20：GLM 双 provider 支持完成后全量 595 项离线测试通过，覆盖 `HARNESS_PROVIDER` 自动选择与强制指定、缺失密钥错误、GLM 请求契约、思考模式开关和 `cached_tokens` 缓存字段归一化；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。未读取真实密钥，未发起真实 API 请求。
 - 2026-09-20：V0.9.1 已发布。远端 `main` 提交为 `772f65a6b783b5e89e6360e30fdd6700cfaf6613`，注解标签对象为 `828382f50105c7508ef3b6b1d1f577f86a21aa06`，标签 `v0.9.1` 指向该提交；Release「V0.9.1 - Add-进度反馈、速度提升」为正式版、非草稿并作为 Latest。远端发布树与本地 102 个 blob 的路径、mode 和 SHA 逐项一致。
 - 2026-09-20：进度反馈和异步 MCP 启动完成后全量 591 项离线测试通过，覆盖等待动画、逐字输出顺序、主查询工具参数与耗时显示、管道模式不受限速、`tool_start` 与 `tool` 事件顺序、延迟 MCP 连接、首个提问等待与工具刷新；`python3 -m compileall -q harness tests`、`python3 -m harness --help` 与 `git diff --check` 通过。启动退出实测由约 2.7 秒降至约 0.23 秒。
