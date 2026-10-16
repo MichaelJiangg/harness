@@ -124,7 +124,7 @@ def summarized_messages(prefix, summary, recent):
 
 
 def truncate_tool_result(result, max_chars=TOOL_RESULT_LIMIT):
-    """返回合法 JSON；超长时保留原序列化内容的首尾，连同封装严格限长。"""
+    """返回合法 JSON；超长时保留执行状态与内容首尾，连同封装严格限长。"""
     if type(max_chars) is not int or max_chars <= 0:
         raise ValueError("工具结果字符上限必须是正整数。")
     serialized = json.dumps(result, ensure_ascii=False)
@@ -134,10 +134,17 @@ def truncate_tool_result(result, max_chars=TOOL_RESULT_LIMIT):
             and all(isinstance(result.get(key), str) for key in ("stdout", "stderr"))):
         return _truncate_command_result(result, len(serialized), max_chars)
 
+    metadata = {
+        key: result[key] for key in (
+            "status", "executed", "tool", "code", "exit_code", "timed_out", "cancelled",
+        ) if isinstance(result, dict) and key in result
+    }
+
     def envelope(keep):
         head_count = (keep + 1) // 2
         tail_count = keep // 2
         return json.dumps({
+            **metadata,
             "truncated": True,
             "original_chars": len(serialized),
             "head": serialized[:head_count],
@@ -145,7 +152,7 @@ def truncate_tool_result(result, max_chars=TOOL_RESULT_LIMIT):
         }, ensure_ascii=False, separators=(",", ":"))
 
     if len(envelope(0)) > max_chars:
-        raise ValueError("工具结果字符上限不足以容纳截断标记。")
+        raise ValueError("工具结果字符上限不足以容纳执行状态与截断标记。")
     low, high = 0, max_chars
     while low < high:
         middle = (low + high + 1) // 2

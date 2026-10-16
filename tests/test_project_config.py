@@ -1,5 +1,6 @@
 from pathlib import Path
 import io
+import json
 import os
 from contextlib import redirect_stdout
 import tempfile
@@ -133,7 +134,39 @@ timeout = 20
         settings = config.resolve_settings(config_file=path, environ={})
         self.assertEqual(settings["engine"]["max_turns"], 100)
         self.assertEqual(settings["tools"]["bash"]["default_timeout"], 30)
+        for name in ("web_search", "web_fetch", "mcp_tavily_tavily_search"):
+            self.assertIn(name, settings["permissions"]["allow"])
+            self.assertNotIn(name, settings["permissions"]["ask"])
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_default_tavily_search_permission_is_inherited_without_permissions_config(self):
+        for text in (None, '[model]\nname = "custom-model"\n'):
+            with self.subTest(config=text):
+                path = self.root / "missing.toml" if text is None else self.write_config(text)
+                settings = config.resolve_settings(config_file=path, environ={})
+                self.assertIn("mcp_tavily_tavily_search", settings["permissions"]["allow"])
+                self.assertNotIn("mcp_tavily_tavily_search", settings["permissions"]["ask"])
+                if text is not None:
+                    self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_explicit_tavily_permission_lists_are_not_rewritten(self):
+        for field, names in (("allow", ["read_file"]), ("allow", []),
+                             ("ask", ["mcp_tavily_tavily_search"]),
+                             ("deny", ["mcp_tavily_tavily_search"])):
+            with self.subTest(field=field, names=names):
+                text = f'[permissions]\n{field} = {json.dumps(names)}\n'
+                path = self.write_config(text)
+                settings = config.resolve_settings(config_file=path, environ={})
+                self.assertEqual(settings["permissions"][field], names)
+                self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_explicit_web_permissions_are_preserved_when_loading_existing_config(self):
+        path = self.write_config('[permissions]\nask = ["web_search"]\ndeny = ["web_fetch"]\n')
+        settings = config.resolve_settings(config_file=path, environ={})
+        self.assertEqual(settings["permissions"]["ask"], ["web_search"])
+        self.assertEqual(settings["permissions"]["deny"], ["web_fetch"])
+        self.assertEqual(path.read_text(encoding="utf-8"),
+                         '[permissions]\nask = ["web_search"]\ndeny = ["web_fetch"]\n')
 
     def test_version_argument_prints_package_version(self):
         output = io.StringIO()

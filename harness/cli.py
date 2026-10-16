@@ -12,7 +12,7 @@ from time import monotonic
 
 from rich.console import Console, Group
 from rich.live import Live
-from rich.markdown import Markdown
+from rich.markdown import Markdown, TableElement
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
@@ -105,6 +105,18 @@ BRIEF_HELP = """Try:
 ACTIVITY_DEFAULT_COUNT = 50
 ACTIVITY_MAX_EVENTS = 500
 MCP_READY_TIMEOUT = 3
+
+
+class _WrappingTableElement(TableElement):
+    def __rich_console__(self, console, options):
+        for table in super().__rich_console__(console, options):
+            for column in table.columns:
+                column.overflow = "fold"
+            yield table
+
+
+class _TerminalMarkdown(Markdown):
+    elements = {**Markdown.elements, "table_open": _WrappingTableElement}
 
 
 def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output=None,
@@ -249,6 +261,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
     turn = 0
     stream_line_open = False
     response_streamed = False
+    stream_kind = None
     stream_buffer = ""
     partial_reply = ""
     interrupt_rendered = False
@@ -284,7 +297,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
         nonlocal stream_live
         if stream_live is not None:
             try:
-                stream_live.stop()
+                try:
+                    # stop 会重新渲染全文，先清空预览避免滚动残留。
+                    stream_live.update("", refresh=True)
+                finally:
+                    stream_live.stop()
             except Exception:
                 pass
             stream_live = None
@@ -329,7 +346,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             if terminal:
                 stop_stream_live()
                 console.print(Panel(
-                    Markdown(_preview_text(content), code_theme="monokai", justify="left"),
+                    _TerminalMarkdown(_preview_text(content), code_theme="monokai", justify="left"),
                     title=title,
                     border_style="cyan",
                     expand=False,
@@ -337,7 +354,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 ))
             else:
                 end_stream_line()
-                print(f"\n{active_label} > {content}", file=output, flush=True)
+                label = f"{active_label} >" if title == "Assistant" else f"[{title}]"
+                print(f"\n{label} {content}", file=output, flush=True)
 
     def record_activity(message, kind):
         nonlocal activity_entries, activity_next_id
@@ -394,14 +412,15 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             write(f"未找到活动记录 #{target}。", style="yellow")
 
     def start_stream():
-        nonlocal response_streamed, stream_buffer, stream_line_open, stream_live
+        nonlocal response_streamed, stream_buffer, stream_line_open, stream_live, stream_kind
         response_streamed = False
+        stream_buffer = ""
+        stream_kind = "pending"
         if not terminal:
             stream_line_open = False
             return
         with output_lock:
             stop_stream_live()
-            stream_buffer = ""
             stream_live = Live(
                 Spinner("dots", text="思考中..."),
                 console=console,
@@ -412,31 +431,43 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
 
     def append_stream(fragment):
         nonlocal response_streamed, stream_buffer, stream_line_open
+        stream_buffer += fragment
         if not terminal:
             with output_lock:
                 if not stream_line_open:
-                    print(f"\n{active_label} > " if not response_streamed else f"{active_label} > ",
+                    prefix = "\n" if not response_streamed else ""
+                    print(f"{prefix}{active_label} > [生成中（未完成）] ",
                           end="", file=output, flush=True)
                 print(fragment, end="", file=output, flush=True)
                 stream_line_open = True
                 response_streamed = True
             return
-        stream_buffer += fragment
         response_streamed = True
         with output_lock:
             if stream_live is not None:
                 stream_live.update(
                     Panel(
-                        Markdown(
+                        _TerminalMarkdown(
                             _preview_text(stream_buffer, multiline=True),
                             code_theme="monokai",
                             justify="left",
                         ),
-                        title="Assistant",
+                        title="生成中（未完成）",
                         border_style="cyan",
                         padding=(0, 1),
                     )
                 )
+
+    def finish_unfinished_stream():
+        nonlocal stream_kind
+        if stream_kind != "pending":
+            return
+        if terminal and response_streamed and stream_buffer:
+            write_markdown("未完成", stream_buffer)
+        else:
+            with output_lock:
+                end_stream_line()
+        stream_kind = "incomplete"
 
     def save_memory_summary():
         nonlocal messages
@@ -991,7 +1022,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             record_activity(message, "tool")
 
     def on_event(event):
-        nonlocal skip_next_response_start
+        nonlocal skip_next_response_start, response_streamed, stream_buffer, stream_kind
         if abort.is_set():
             return
         agent = event.get("agent")
@@ -1010,7 +1041,28 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             else "green" if swarm
             else None
         )
-        if (delegated or background or swarm) and event["type"] in {"text", "response_start"}:
+        if (delegated or background or swarm) and event["type"] == "retry":
+            record_activity(prefix + _activity_message(event), "retry")
+            return
+        if (delegated or background or swarm) and event["type"] in {"text", "response_start", "response_end"}:
+            if event["type"] == "response_end" and event.get("kind") == "tool_calls" and event.get("content"):
+                record_activity(prefix + event["content"] + "\n继续执行工具。", "progress")
+            return
+        if event["type"] == "response_end":
+            stream_kind = event["kind"]
+            if stream_kind == "tool_calls":
+                content = event.get("content", "")
+                if content.strip():
+                    record_activity(content + "\n继续执行工具。", "progress")
+                    if terminal or not response_streamed:
+                        write_markdown("过程进度", content + "\n\n继续执行工具。")
+                    else:
+                        write("[过程进度] 继续执行工具。", style="blue")
+                else:
+                    with output_lock:
+                        end_stream_line()
+                stream_buffer = ""
+                response_streamed = False
             return
         if event["type"] == "hook":
             for output in event.get("outputs", []):
@@ -1132,6 +1184,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     return
         elif event["type"] == "retry":
             if event["partial"]:
+                finish_unfinished_stream()
                 write(prefix + "[重试] 上次输出未完成，重新生成。", style="yellow")
             write(
                 f'{prefix}[重试] {event["message"]}；{event["delay"]} 秒后进行第 {event["attempt"]} 次重试。',
@@ -1139,10 +1192,11 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
             )
 
     def run_query(state, *, compact=False):
-        nonlocal interrupt_rendered, messages, partial_reply, query_interrupted, response_streamed, skip_next_response_start
+        nonlocal interrupt_rendered, messages, partial_reply, query_interrupted, response_streamed, skip_next_response_start, stream_kind
         query_interrupted = False
         interrupt_rendered = False
         partial_reply = ""
+        stream_kind = None
         try:
             if compact:
                 if compact_history(state, force=True) and not abort.is_set():
@@ -1167,6 +1221,8 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                 messages = state.messages
                 if terminal or not response_streamed:
                     write_markdown("Assistant", answer)
+                else:
+                    write("[回答完成]", style="green")
                 result = hook_manager.run("after_reply", {"reply": answer})
                 report_hook_result("after_reply", result)
         except QueryAborted:
@@ -1193,13 +1249,16 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     messages = snapshot
         except Exception as error:
             if not abort.is_set():
+                finish_unfinished_stream()
+                if not compact and stream_kind != "final":
+                    write("[未完成] 本轮未获得最终回答。", style="yellow")
                 write(f"错误：{error}", error=True)
         finally:
             if (
                 terminal and response_streamed and stream_buffer
                 and query_interrupted and not interrupt_rendered
             ):
-                write_markdown("Assistant", stream_buffer)
+                write_markdown("未完成（已中断）", stream_buffer)
             else:
                 with output_lock:
                     stop_stream_live()
@@ -1513,7 +1572,7 @@ def run_cli(client, *, ledger=None, input_stream=None, output=None, error_output
                     if not query_interrupted:
                         if terminal and response_streamed and stream_buffer:
                             partial_reply = stream_buffer
-                            write_markdown("Assistant", stream_buffer)
+                            write_markdown("未完成（已中断）", stream_buffer)
                             interrupt_rendered = True
                         write("\n查询已停止。")
                     query_interrupted = True
@@ -1692,6 +1751,8 @@ def _tool_result_summary(name, result):
             message += f' 下一页：offset={result["next_offset"]}，column={result["next_column"]}。'
     if name == "grep":
         message += f' 返回 {result.get("returned_count", 0)} 条匹配。'
+    if name == "web_search" and result.get("truncated") is True:
+        message += " 结果已裁剪。"
     if name == "bash":
         message += (
             f' 退出码：{result.get("exit_code")}'

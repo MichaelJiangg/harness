@@ -53,6 +53,7 @@ class DelegateIntegrationTests(unittest.TestCase):
         return state
 
     def test_child_reads_and_searches_with_isolated_history_and_shared_accounting(self):
+        events = []
         task = "读取 main.py 并搜索 needle"
         child_calls = [call("read-1", "read_file", path="main.py"),
                        call("grep-1", "grep", keyword="needle", glob="*.py")]
@@ -61,8 +62,10 @@ class DelegateIntegrationTests(unittest.TestCase):
             reply(None, child_calls),
             reply("子任务报告：main.py 第一行定义 needle。"),
             reply("主任务总结完成。"),
-        ], model="test-model", turn=7)
+        ], model="test-model", turn=7, on_event=events.append)
         self.assertEqual(query_loop(state), "主任务总结完成。")
+        self.assertFalse(any(event["type"] == "response_end" and event.get("agent") == "delegate"
+                             for event in events))
         requests = state.client.requests
         child_messages = requests[1]["messages"]
         self.assertEqual([message["role"] for message in child_messages], ["system", "user"])
@@ -376,11 +379,13 @@ class DelegateIntegrationTests(unittest.TestCase):
             reply(second_summary),
             reply("第二次压缩后完成比较。"),
             reply("主任务整理完成。"),
-        ], tools=tools, context_limit=6200, summary_limit=1600, max_compactions=2)
+        ], tools=tools, context_limit=7000, summary_limit=1600, max_compactions=2)
         with patch("harness.engine.compact_history", wraps=compact_history) as compact:
             self.assertEqual(query_loop(state), "主任务整理完成。")
         requests = state.client.requests
         self.assertEqual(len(requests), 7)
+        for request in requests:
+            self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
         self.assertEqual(requests[3]["tools"], [])
         self.assertEqual(requests[4]["tools"], [])
         second_source = json.dumps(requests[4]["messages"], ensure_ascii=False)

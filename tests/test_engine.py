@@ -49,7 +49,7 @@ class QueryLoopTests(unittest.TestCase):
         self.assertEqual(len(state.client.requests), 1)
         self.assertEqual(state.ledger.summary()["total_tokens"], 120)
         self.assertEqual(state.messages[-1]["content"], "最终回答")
-        self.assertEqual([event["type"] for event in events], ["response_start", "usage"])
+        self.assertEqual([event["type"] for event in events], ["response_start", "usage", "response_end"])
 
     def test_tool_start_event_precedes_tool_result_and_keeps_call_id(self):
         events = []

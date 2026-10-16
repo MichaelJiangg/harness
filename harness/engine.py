@@ -107,11 +107,33 @@ def _format_read_progress(progress):
     return "\n文件尚未读到末尾，下一页位置（从 0 开始）：\n" + "\n".join(positions)
 
 
-def _has_unfinished_tool_history(messages):
-    """当前轮已有工具结果但仍可继续扩展时，允许先产生下一组完整批次再压缩。"""
-    return (bool(messages) and messages[-1].get("role") == "tool"
-            and any(message.get("role") == "assistant" and message.get("tool_calls")
-                    for message in messages))
+def _summary_units(messages):
+    """摘要分段以完整消息或完整 assistant／tool 批次为单位。"""
+    units = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.get("role") == "tool":
+            raise ValueError("历史中存在没有对应调用的工具结果。")
+        calls = message.get("tool_calls")
+        if not calls:
+            units.append([message])
+            index += 1
+            continue
+        if message.get("role") != "assistant" or not isinstance(calls, list):
+            raise ValueError("历史工具调用格式无效。")
+        ids = [call.get("id") if isinstance(call, dict) else None for call in calls]
+        results = messages[index + 1:index + 1 + len(calls)]
+        result_ids = [result.get("tool_call_id") for result in results]
+        if (any(not isinstance(call_id, str) or not call_id for call_id in ids)
+                or len(set(ids)) != len(ids) or len(results) != len(ids)
+                or any(result.get("role") != "tool" for result in results)
+                or any(not isinstance(call_id, str) for call_id in result_ids)
+                or sorted(result_ids) != sorted(ids)):
+            raise ValueError("历史工具调用和结果未完整配对。")
+        units.append([message, *results])
+        index += 1 + len(calls)
+    return units
 
 
 def query_loop(state):
@@ -132,6 +154,11 @@ def query_loop(state):
 
         # 必须保留 assistant 工具调用消息，后面的 tool 结果才能与之关联。
         state.messages.append(message)
+        state.on_event({
+            "type": "response_end", "kind": "tool_calls" if tool_calls else "final",
+            "content": message.get("content") or "",
+            "finish_reason": response["choices"][0]["finish_reason"],
+        })
         if not tool_calls:
             return message["content"]
 
@@ -163,6 +190,8 @@ def query_loop(state):
             })
             original_chars = len(json.dumps(result, ensure_ascii=False))
             displayed_result = result if original_chars <= state.tool_result_limit else {
+                **{key: result[key] for key in ("status", "executed", "tool", "code") if key in result},
+                "truncated": True,
                 "message": f"结果过长，已截断（原 {original_chars} 字符，保留 {len(content)} 字符）。",
             }
             state.on_event({
@@ -179,6 +208,8 @@ def _request(state, *, messages, tools, display, max_tokens=None):
     for attempt in range(state.max_retries + 1):
         if state.abort.is_set():
             raise QueryAborted("查询已停止。")
+        if context_size(messages, tools) > state.context_limit:
+            raise ContextTooLong(pending_read_progress(state))
         budget = state.request_parent if state.request_parent is not None else state
         if state.request_count >= state.max_requests or budget.request_count >= budget.max_requests:
             raise RuntimeError(f"已达到 {state.max_requests} 次模型请求上限；用量仍计入 /cost。"
@@ -238,9 +269,6 @@ def compact_history(state, *, force=False):
                 candidate, state.keep_recent_turns, include_tool_history=True,
             )
         if context_size(prefix + recent, state.tools) > state.context_limit:
-            if _has_unfinished_tool_history(candidate):
-                # 只有一组工具批次时还不能摘要；先让当前轮继续，产生下一批后再处理。
-                return False
             raise ContextTooLong(pending_read_progress(state))
         if not older:
             if original_size > state.context_limit:
@@ -248,22 +276,39 @@ def compact_history(state, *, force=False):
             state.on_event({"type": "compact_skipped"})
             return False
 
-        state.compaction_count += 1
-        state.on_event({"type": "compact_start", "attempt": state.compaction_count})
-        response = _request(
-            state, messages=summary_request(older, state.summary_limit), tools=[], display=False,
-            max_tokens=state.summary_limit * 2,
-        )
         try:
-            message, tool_calls = _read_reply(response)
-        except RuntimeError:
-            continue
-        summary = (message.get("content") or "").strip()
-        if tool_calls or not summary:
-            continue
-        if len(summary) > state.summary_limit:
-            # API 的 max_tokens 是 token 数，不保证字符数；完整回复截到预算内。
-            summary = summary[:state.summary_limit]
+            units = _summary_units(older)
+        except ValueError:
+            raise ContextTooLong(pending_read_progress(state)) from None
+        summary = ""
+        while units and state.compaction_count < state.max_compactions:
+            source = [{"role": "assistant", "content": "[历史对话摘要]\n" + summary}] if summary else []
+            count = 0
+            for unit in units:
+                if context_size(summary_request(source + unit, state.summary_limit), []) > state.context_limit:
+                    break
+                source.extend(unit)
+                count += 1
+            if not count:
+                raise ContextTooLong(pending_read_progress(state))
+            state.compaction_count += 1
+            state.on_event({"type": "compact_start", "attempt": state.compaction_count})
+            response = _request(
+                state, messages=summary_request(source, state.summary_limit), tools=[], display=False,
+                max_tokens=state.summary_limit * 2,
+            )
+            try:
+                message, tool_calls = _read_reply(response)
+            except RuntimeError:
+                continue
+            text = (message.get("content") or "").strip()
+            if tool_calls or not text:
+                continue
+            # max_tokens 不保证字符数；已完成的摘要仍按字符预算裁剪。
+            summary = text[:state.summary_limit]
+            units = units[count:]
+        if units:
+            break
         proposed = summarized_messages(prefix, summary, recent)
         after = context_size(proposed, state.tools)
         if after >= context_size(candidate, state.tools):

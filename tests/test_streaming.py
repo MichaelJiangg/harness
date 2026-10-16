@@ -67,7 +67,7 @@ class StreamingIntegrationTests(unittest.TestCase):
         flushed = Event()
 
         def observe_flush(output):
-            if "DeepSeek > 第一段中文" in output.getvalue():
+            if "DeepSeek > [生成中（未完成）] 第一段中文" in output.getvalue():
                 flushed.set()
 
         with patch.object(ObservableOutput, "flush", observe_flush):
@@ -77,11 +77,13 @@ class StreamingIntegrationTests(unittest.TestCase):
                 self.assertTrue(flushed.wait(3))
                 self.assertFalse(session.finished.is_set())
                 self.assertNotIn("随后完成", session.output.getvalue())
+                self.assertNotIn("[回答完成]", session.output.getvalue())
                 response.release.set()
                 session.join()
                 output = session.output.getvalue()
                 self.assertEqual(output.count("DeepSeek >"), 1)
                 self.assertEqual(output.count("第一段中文，随后完成。"), 1)
+                self.assertEqual(output.count("[回答完成]"), 1)
                 self.assertEqual(session.errors.getvalue(), "")
             finally:
                 response.release.set()
@@ -132,6 +134,9 @@ class StreamingIntegrationTests(unittest.TestCase):
         self.assertEqual([event["text"] for event in events if event["type"] == "text"], [
             "开始检查。", "检查完成。",
         ])
+        ended = [event for event in events if event["type"] == "response_end"]
+        self.assertEqual([event["kind"] for event in ended], ["tool_calls", "final"])
+        self.assertEqual([event["content"] for event in ended], ["开始检查。", "检查完成。"])
         self.assertEqual([record["total_tokens"] for record in state.ledger.records], [15, 23])
         self.assertEqual([record["turn"] for record in state.ledger.records], [1, 1])
         self.assertEqual(state.ledger.summary()["total_tokens"], 38)
@@ -158,13 +163,13 @@ class StreamingIntegrationTests(unittest.TestCase):
             session.input.send("/cost\n")
             self.assertTrue(session.output.wait_for("尚未返回的请求用量将在返回后记录。"))
             output = session.output.getvalue()
-            self.assertIn("DeepSeek > 正在说明\n本次会话用量与费用", output)
+            self.assertIn("DeepSeek > [生成中（未完成）] 正在说明\n本次会话用量与费用", output)
             self.assertIn("模型请求：1 次。", output)
             self.assertIn("Token 合计：输入 10，输出 5，合计 15。", output)
             self.assertEqual(ledger.summary()["requests"], 1)
             second.release.set()
             session.close()
-            self.assertIn("DeepSeek > 占位结果。", session.output.getvalue())
+            self.assertIn("DeepSeek > [生成中（未完成）] 占位结果。", session.output.getvalue())
             self.assertEqual(session.output.getvalue().count("正在说明"), 1)
             self.assertEqual(ledger.summary()["requests"], 2)
             self.assertEqual(ledger.summary()["total_tokens"], 38)
@@ -211,7 +216,7 @@ class StreamingIntegrationTests(unittest.TestCase):
                 self.assertNotIn("private-response-body", session.errors.getvalue())
                 self.assertEqual(ledger.summary()["missing_usage_requests"], 4)
                 session.input.send("新的问题\n")
-                self.assertTrue(session.output.wait_for("DeepSeek > 重试成功。"))
+                self.assertTrue(session.output.wait_for("DeepSeek > [生成中（未完成）] 重试成功。"))
                 session.close()
                 self.assertEqual(requests[4]["messages"][1:], [{"role": "user", "content": "新的问题"}])
                 self.assertEqual(session.output.getvalue().count("仅收到部分回答"), 4)

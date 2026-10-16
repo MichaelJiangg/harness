@@ -6,6 +6,7 @@ from threading import Event
 import unittest
 from unittest.mock import Mock, patch
 
+from harness import config
 from harness.engine import QueryState, query_loop
 from harness.permissions import PermissionPolicy
 from harness.tools import ToolRegistry, create_tool_executor, execute_tool
@@ -63,6 +64,76 @@ class PermissionPolicyTests(unittest.TestCase):
                 with self.subTest(command=command):
                     result = policy.evaluate("bash", {"command": command}, workspace=root)
                     self.assertNotEqual(result.matched_rule, "session:auto")
+
+    def test_auto_mode_respects_rules_even_when_the_rule_is_named_default(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for action in ("ask", "deny"):
+                with self.subTest(action=action):
+                    policy = PermissionPolicy(mode="auto", rules=[{
+                        "tool": "write_file", "action": action,
+                        "directory": "restricted", "name": "default",
+                    }])
+                    result = policy.evaluate("write_file", {"path": "restricted/note.txt"},
+                                             workspace=root)
+                    self.assertEqual(result.decision, action)
+                    self.assertEqual(result.matched_rule, "default")
+                    self.assertTrue(result.rule_matched)
+                    allowed = policy.evaluate("write_file", {"path": "notes/note.txt"},
+                                              workspace=root)
+                    self.assertEqual(allowed.matched_rule, "session:auto")
+                    self.assertFalse(allowed.rule_matched)
+
+    def test_web_defaults_and_explicit_permissions_apply_in_both_modes(self):
+        for mode in ("ask", "auto"):
+            for name in ("web_search", "web_fetch"):
+                with self.subTest(mode=mode, tool=name):
+                    self.assertEqual(PermissionPolicy(mode=mode).check(name), "allow")
+                    self.assertEqual(PermissionPolicy(mode=mode, ask=[name]).check(name), "ask")
+                    self.assertEqual(PermissionPolicy(mode=mode, deny=[name]).check(name), "deny")
+                    self.assertEqual(PermissionPolicy(mode=mode).check("mcp_server_search"), "ask")
+                    for action in ("ask", "deny"):
+                        policy = PermissionPolicy(mode=mode, rules=[{
+                            "tool": name, "action": action,
+                        }])
+                        self.assertEqual(policy.check(name), action)
+
+    def test_default_tavily_search_is_allowed_by_exact_name_in_both_modes(self):
+        with TemporaryDirectory() as directory:
+            settings = config.resolve_settings(config_file=Path(directory) / "missing.toml", environ={})
+        for mode in ("ask", "auto"):
+            policy = PermissionPolicy(**settings["permissions"], mode=mode)
+            with self.subTest(mode=mode):
+                decision = policy.evaluate("mcp_tavily_tavily_search")
+                self.assertEqual(decision.decision, "allow")
+                self.assertEqual(decision.risk, "medium")
+                self.assertEqual(decision.matched_rule, "tools:allow")
+            for name in (
+                "mcp_tavily_tavily_search_extra", "mcp_tavily_tavily_search2",
+                "mcp_other_tavily_search", "mcp_tavily_tavily_extract",
+                "mcp_tavily_tavily_crawl", "mcp_tavily_search",
+            ):
+                with self.subTest(mode=mode, tool=name):
+                    self.assertEqual(policy.check(name), "ask")
+
+    def test_default_tavily_search_respects_explicit_lists_and_rules_in_both_modes(self):
+        with TemporaryDirectory() as directory:
+            settings = config.resolve_settings(config_file=Path(directory) / "missing.toml", environ={})
+        name = "mcp_tavily_tavily_search"
+        for mode in ("ask", "auto"):
+            for action in ("ask", "deny"):
+                with self.subTest(mode=mode, action=action, source="list"):
+                    permissions = {**settings["permissions"], action: [name]}
+                    policy = PermissionPolicy(**permissions, mode=mode)
+                    self.assertEqual(policy.check(name), action)
+                with self.subTest(mode=mode, action=action, source="rule"):
+                    permissions = {**settings["permissions"], "rules": [{
+                        "tool": name, "action": action,
+                    }]}
+                    policy = PermissionPolicy(**permissions, mode=mode)
+                    decision = policy.evaluate(name)
+                    self.assertEqual(decision.decision, action)
+                    self.assertTrue(decision.rule_matched)
 
     def test_rules_are_immutable_snapshots_of_supplied_collections(self):
         allowed = ["read_file"]

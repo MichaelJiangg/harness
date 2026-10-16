@@ -5,7 +5,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from ..config import load_tavily_api_key
+from ..config import get_settings, load_tavily_api_key
 from .definition import ToolDefinition
 from .executor import ToolError
 
@@ -23,8 +23,9 @@ DEFINITION = ToolDefinition(
         "使用 Tavily 搜索公开网页，返回标题、URL、内容摘要和相关度。"
         "适合调研未知产品、竞品、行业动态和公开资料；max_results 默认 5，最多 10。"
         "搜索完成后应优先使用 web_fetch 读取重点 URL。"
+        "结果按当前字符预算裁剪摘要或省略整条来源，保留完整链接并标记裁剪。"
         "需要本地配置 TAVILY_API_KEY；未配置时返回可理解的配置错误。"
-        "默认需要用户确认，搜索词和结果不会写入权限日志正文。"
+        "默认无需用户确认；显式 ask/deny 规则仍生效，搜索词和结果不会写入权限日志正文。"
     ),
     input_schema={
         "type": "object",
@@ -68,6 +69,13 @@ def execute(arguments, workspace, *, opener=None, api_key=None, abort=None):
     if abort is not None and abort.is_set():
         raise ToolError("execution_cancelled", "网页搜索已取消。")
 
+    from ..orchestration import get_current_query
+
+    state = get_current_query()
+    budget = state.tool_result_limit if state is not None else get_settings()["context"]["tool_result_chars"]
+    # 最小搜索信息无法回传时不发起搜索，避免执行后只能伪造空结果。
+    _budget_results(query.strip(), [], "", 0, budget)
+
     request = Request(
         TAVILY_ENDPOINT,
         method="POST",
@@ -108,22 +116,17 @@ def execute(arguments, workspace, *, opener=None, api_key=None, abort=None):
         if not isinstance(payload, dict):
             raise ToolError("web_search_error", "Tavily 返回了无效响应格式。")
 
-    results = _clean_results(payload.get("results"))
+    results, omitted = _clean_results(payload.get("results"), max_results)
     answer = payload.get("answer")
-    return {
-        "status": "success",
-        "query": query.strip(),
-        "answer": _clean_text(answer) if isinstance(answer, str) else "",
-        "results": results,
-        "returned_count": len(results),
-        "message": f"搜索完成，返回 {len(results)} 条结果。",
-    }
+    answer = _clean_text(answer) if isinstance(answer, str) else ""
+    return _budget_results(query.strip(), results, answer, omitted, budget)
 
 
-def _clean_results(value):
+def _clean_results(value, max_results):
     if not isinstance(value, list):
-        return []
+        return [], 0
     results = []
+    omitted = 0
     for item in value:
         if not isinstance(item, dict):
             continue
@@ -133,18 +136,66 @@ def _clean_results(value):
         if (not isinstance(url, str) or not url or urlsplit(url).scheme not in {"http", "https"}
                 or "\x00" in url):
             continue
+        if len(url) > 2048:
+            omitted += 1
+            continue
         score = item.get("score")
         published_date = item.get("published_date")
         result = {
-            "title": title[:300],
-            "url": url[:2048],
-            "content": content[:4000],
+            "title": title,
+            "url": url,
+            "content": content,
             "score": score if isinstance(score, (int, float)) else None,
             "published_date": published_date if isinstance(published_date, str) else None,
         }
         if result["title"] or result["content"]:
             results.append(result)
-    return results[:MAX_RESULTS]
+    return results[:max_results], omitted + max(0, len(results) - max_results)
+
+
+def _budget_results(query, results, answer, omitted, budget):
+    """完整来源先占预算，再按实际 JSON 成本均分可保留的摘要长度。"""
+    if type(budget) is not int or budget <= 0:
+        raise ToolError("search_budget_too_small", "工具结果预算无效，无法返回搜索结果。")
+    retained = []
+
+    def build(chars):
+        items = [{**item, "content": item["content"][:chars],
+                  "content_truncated": len(item["content"]) > chars} for item in retained]
+        return {
+            "status": "success", "query": query, "answer": answer[:chars],
+            "answer_truncated": len(answer) > chars,
+            "results": items, "returned_count": len(items), "omitted_count": omitted,
+            "truncated": bool(omitted or len(answer) > chars
+                              or any(item["content_truncated"] for item in items)),
+            "message": (f"搜索完成，返回 {len(items)} 条结果。"
+                        + (f" 已省略 {omitted} 条来源。" if omitted else "")),
+        }
+
+    def fits(result):
+        complete = {**result, "executed": True, "tool": "web_search"}
+        return len(json.dumps(complete, ensure_ascii=False)) <= budget
+
+    for item in results:
+        retained.append(item)
+        if not fits(build(0)):
+            retained.pop()
+            omitted += 1
+
+    while not fits(build(0)):
+        if not retained:
+            raise ToolError("search_budget_too_small", "工具结果预算不足，无法容纳搜索信息。")
+        retained.pop()
+        omitted += 1
+
+    low, high = 0, max([len(answer)] + [len(item["content"]) for item in retained])
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(build(middle)):
+            low = middle
+        else:
+            high = middle - 1
+    return build(low)
 
 
 def _clean_text(value):

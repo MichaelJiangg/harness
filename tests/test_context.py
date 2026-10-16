@@ -279,6 +279,33 @@ class ToolResultTruncationTests(unittest.TestCase):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
                 truncate_tool_result({"message": "长" * 1000}, max_chars=limit)
 
+    def test_truncation_preserves_success_and_error_execution_metadata(self):
+        for status, executed, code in (("success", True, None),
+                                       ("error", False, "permission_denied"),
+                                       ("error", True, "runtime_failed")):
+            with self.subTest(status=status, executed=executed):
+                result = {"status": status, "executed": executed, "tool": "external_tool",
+                          "message": '中文😀"\\\n' * 1000}
+                if code is not None:
+                    result["code"] = code
+                original = deepcopy(result)
+                encoded = truncate_tool_result(result, 500)
+                parsed = json.loads(encoded)
+                self.assertLessEqual(len(encoded), 500)
+                for key in ("status", "executed", "tool", "code"):
+                    if key in result:
+                        self.assertEqual(parsed[key], result[key])
+                    else:
+                        self.assertNotIn(key, parsed)
+                self.assertTrue(parsed["truncated"])
+                self.assertEqual(result, original)
+
+    def test_budget_cannot_discard_execution_metadata_to_fit(self):
+        result = {"status": "error", "executed": True, "tool": "external_tool",
+                  "code": "failure_" * 100, "message": "长" * 1000}
+        with self.assertRaises(ValueError):
+            truncate_tool_result(result, 200)
+
 
 class BashResultTruncationTests(unittest.TestCase):
     def result(self, stdout="", stderr="", **metadata):

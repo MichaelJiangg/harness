@@ -34,6 +34,21 @@ def history(count=6):
     return messages
 
 
+def tool_history(count=6):
+    messages = [{"role": "system", "content": "系统约束保持不变"},
+                {"role": "user", "content": "完整分析所有资料，保留原任务。"}]
+    for index in range(count):
+        calls = [tool_call(f"batch-{index}-{part}") for part in range(2)]
+        messages.append({"role": "assistant", "content": None, "tool_calls": calls})
+        for item in calls:
+            messages.append({
+                "role": "tool", "tool_call_id": item["id"],
+                "content": json.dumps({"status": "success", "executed": True,
+                                       "tool": "read_file", "content": "资" * 450}, ensure_ascii=False),
+            })
+    return messages
+
+
 class ScriptedClient:
     def __init__(self, responses):
         self.responses = list(responses)
@@ -58,10 +73,27 @@ class EngineManagementTests(unittest.TestCase):
         abort.wait.return_value = False
         return QueryState(ScriptedClient(responses), UsageLedger(), tools=[], abort=abort, **kwargs)
 
+    def assert_requests_within_budget(self, state):
+        for request in state.client.requests:
+            self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
+
+    def assert_complete_tool_batches(self, messages):
+        pending = set()
+        for message in messages:
+            if message["role"] == "assistant" and message.get("tool_calls"):
+                self.assertFalse(pending)
+                pending = {item["id"] for item in message["tool_calls"]}
+            elif message["role"] == "tool":
+                self.assertIn(message["tool_call_id"], pending)
+                pending.remove(message["tool_call_id"])
+            else:
+                self.assertFalse(pending)
+        self.assertFalse(pending)
+
     def test_automatic_compaction_preserves_recent_round_and_current_question(self):
         events = []
         state = self.state([reply("目标与待办已总结"), reply("继续回答")],
-                           context_limit=1200, summary_limit=100, keep_recent_turns=1, on_event=events.append)
+                           context_limit=2800, summary_limit=100, keep_recent_turns=1, on_event=events.append)
         state.messages = history() + [{"role": "user", "content": "当前问题"}]
         recent = deepcopy(state.messages[-3:])
         self.assertEqual(query_loop(state), "继续回答")
@@ -70,7 +102,7 @@ class EngineManagementTests(unittest.TestCase):
         self.assertEqual(summary_request["tools"], [])
         self.assertEqual(summary_request["max_tokens"], 200)
         self.assertNotIn("当前问题", json.dumps(summary_request["messages"], ensure_ascii=False))
-        self.assertLessEqual(context_size(normal_request["messages"], []), 1200)
+        self.assert_requests_within_budget(state)
         self.assertEqual(state.ledger.summary()["requests"], 2)
         self.assertEqual(state.ledger.summary()["total_tokens"], 30)
         self.assertEqual([event["text"] for event in events if event["type"] == "text"], ["继续回答"])
@@ -94,7 +126,7 @@ class EngineManagementTests(unittest.TestCase):
 
     def test_overlong_complete_summary_is_truncated_to_budget_and_committed(self):
         state = self.state([reply("超" * 101)],
-                           context_limit=1200, summary_limit=100, keep_recent_turns=1)
+                           context_limit=2800, summary_limit=100, keep_recent_turns=1)
         state.messages = history()
         original = deepcopy(state.messages)
         self.assertTrue(compact_history(state, force=True))
@@ -105,10 +137,11 @@ class EngineManagementTests(unittest.TestCase):
                        and (message.get("content") or "").startswith("[历史对话摘要]"))
         self.assertEqual(len(summary["content"].removeprefix("[历史对话摘要]\n")), 100)
         self.assertEqual(len(state.client.requests), 1)
+        self.assert_requests_within_budget(state)
 
     def test_unfinished_model_summary_preserves_history_and_consumes_compaction_limit(self):
         state = self.state([reply("不完整摘要", reason="length")],
-                           context_limit=1200, summary_limit=100, keep_recent_turns=1,
+                           context_limit=2800, summary_limit=100, keep_recent_turns=1,
                            max_compactions=1)
         state.messages = history()
         original = deepcopy(state.messages)
@@ -117,6 +150,7 @@ class EngineManagementTests(unittest.TestCase):
         self.assertEqual(state.messages, original)
         self.assertEqual(state.compaction_count, 1)
         self.assertEqual(len(state.client.requests), 1)
+        self.assert_requests_within_budget(state)
 
     def test_summary_network_failure_keeps_original_history(self):
         state = self.state([APIError("无法生成摘要")], keep_recent_turns=1)
@@ -137,15 +171,72 @@ class EngineManagementTests(unittest.TestCase):
     def test_compaction_limit_is_shared_across_the_entire_tool_loop(self):
         state = self.state([
             reply("摘" * 180), reply(None, [tool_call("first")]),
-            reply("摘要"), reply(None, [tool_call("second")]),
-        ], context_limit=620, summary_limit=200, keep_recent_turns=0, max_compactions=2,
-            tool_executor=lambda *args: {"message": "结果" * 60})
+            reply(None, [tool_call("second")]), reply("摘要"),
+            reply(None, [tool_call("third")]),
+        ], context_limit=2800, summary_limit=200, keep_recent_turns=1, max_compactions=2,
+            tool_executor=lambda *args: {"message": "结果" * 650})
         state.messages = history() + [{"role": "user", "content": "当前问题"}]
         with self.assertRaises(ContextTooLong):
             query_loop(state)
         self.assertEqual(state.compaction_count, 2)
-        self.assertEqual(len(state.client.requests), 4)
-        self.assertEqual(state.ledger.summary()["requests"], 4)
+        self.assertEqual(len(state.client.requests), 5)
+        self.assertEqual(state.ledger.summary()["requests"], 5)
+        self.assert_requests_within_budget(state)
+
+    def test_oversized_summary_source_is_split_into_bounded_complete_tool_batches(self):
+        def respond(request):
+            return reply("阶段摘要" if "max_tokens" in request else "继续回答")
+
+        state = self.state([respond] * 20, context_limit=2500, summary_limit=100,
+                           keep_recent_turns=0)
+        state.messages = tool_history(6)
+        original_task = deepcopy(state.messages[1])
+        latest = deepcopy(state.messages[-3:])
+        self.assertEqual(query_loop(state), "继续回答")
+        summaries = [request for request in state.client.requests if "max_tokens" in request]
+        self.assertGreater(len(summaries), 1)
+        self.assertLessEqual(len(summaries), state.max_compactions)
+        summarized_ids = []
+        for request in summaries:
+            source = json.loads(request["messages"][-1]["content"].split("\n", 1)[1])
+            self.assert_complete_tool_batches(source)
+            summarized_ids.extend(message["tool_call_id"] for message in source
+                                  if message["role"] == "tool")
+        self.assertCountEqual(summarized_ids, [f"batch-{index}-{part}"
+                                             for index in range(5) for part in range(2)])
+        self.assertIn(original_task, state.messages)
+        self.assertEqual(state.messages[-4:-1], latest)
+        self.assert_requests_within_budget(state)
+        self.assertEqual(state.ledger.summary()["requests"], len(state.client.requests))
+        self.assertEqual(state.compaction_count, len(summaries))
+
+    def test_segmented_summaries_share_compaction_limit_and_preserve_history(self):
+        state = self.state([reply("阶段摘要")] * 6, context_limit=2500, summary_limit=100,
+                           keep_recent_turns=0, max_compactions=2)
+        state.messages = tool_history(8)
+        state.read_progress = {"README.md": {"next_offset": 25, "next_column": 0, "eof": False}}
+        original = deepcopy(state.messages)
+        progress = deepcopy(state.read_progress)
+        with self.assertRaises(ContextTooLong):
+            compact_history(state)
+        self.assertEqual(state.compaction_count, 2)
+        self.assertEqual(len(state.client.requests), 2)
+        self.assertEqual(state.messages, original)
+        self.assertEqual(state.read_progress, progress)
+        self.assert_requests_within_budget(state)
+
+    def test_segmented_summaries_share_request_limit_and_preserve_history(self):
+        state = self.state([reply("阶段摘要")] * 6, context_limit=2500, summary_limit=100,
+                           keep_recent_turns=0, max_requests=2)
+        state.messages = tool_history(8)
+        original = deepcopy(state.messages)
+        with self.assertRaisesRegex(RuntimeError, "模型请求上限"):
+            compact_history(state)
+        self.assertEqual(state.request_count, 2)
+        self.assertEqual(len(state.client.requests), 2)
+        self.assertEqual(state.ledger.summary()["requests"], 2)
+        self.assertEqual(state.messages, original)
+        self.assert_requests_within_budget(state)
 
     def test_transient_retries_wait_progressively_and_count_every_attempt(self):
         events = []
@@ -193,26 +284,60 @@ class EngineManagementTests(unittest.TestCase):
 
     def test_summary_and_retries_share_actual_request_limit(self):
         state = self.state([reply("摘要"), APIError("网络中断", retryable=True)],
-                           keep_recent_turns=1, context_limit=1200, max_requests=2)
+                           keep_recent_turns=1, context_limit=2800, max_requests=2)
         state.messages = history() + [{"role": "user", "content": "继续"}]
         with self.assertRaises(APIError):
             query_loop(state)
         self.assertEqual(state.request_count, 2)
         self.assertEqual(state.ledger.summary()["requests"], 2)
         state.abort.wait.assert_not_called()
+        self.assert_requests_within_budget(state)
 
     def test_large_tool_result_is_truncated_before_next_request_and_display(self):
         events = []
         state = self.state([reply(None, [tool_call()]), reply("完成")], tool_result_limit=250,
-                           tool_executor=lambda *args: {"message": "头" + "很长" * 1000 + "尾"},
+                           tool_executor=lambda name, arguments: {
+                               "status": "success", "executed": True, "tool": name,
+                               "message": "头" + "很长" * 1000 + "尾",
+                           },
                            on_event=events.append)
         query_loop(state)
         content = state.client.requests[1]["messages"][-1]["content"]
         self.assertLessEqual(len(content), 250)
-        self.assertTrue(json.loads(content)["truncated"])
-        displayed = next(event for event in events if event["type"] == "tool")["result"]["message"]
-        self.assertIn("截断", displayed)
-        self.assertLess(len(displayed), 100)
+        serialized = json.loads(content)
+        self.assertTrue(serialized["truncated"])
+        displayed = next(event for event in events if event["type"] == "tool")["result"]
+        for result in (serialized, displayed):
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(result["executed"])
+            self.assertEqual(result["tool"], "read_file")
+        self.assertIn("截断", displayed["message"])
+        self.assertLess(len(displayed["message"]), 100)
+
+    def test_completed_responses_distinguish_tool_progress_from_final_answer(self):
+        events = []
+        state = self.state([reply("继续核实资料。", [tool_call()]), reply("最终回答。")],
+                           tool_executor=Mock(return_value={"status": "success", "executed": True}),
+                           on_event=events.append)
+        self.assertEqual(query_loop(state), "最终回答。")
+        ended = [event for event in events if event["type"] == "response_end"]
+        self.assertEqual(ended, [
+            {"type": "response_end", "kind": "tool_calls", "content": "继续核实资料。",
+             "finish_reason": "tool_calls"},
+            {"type": "response_end", "kind": "final", "content": "最终回答。", "finish_reason": "stop"},
+        ])
+        self.assertLess(events.index(ended[0]),
+                        next(index for index, event in enumerate(events) if event["type"] == "tool_start"))
+
+    def test_length_reply_does_not_emit_a_completed_response(self):
+        events = []
+        execute = Mock()
+        state = self.state([reply("只有未完成片段。", reason="length")],
+                           tool_executor=execute, on_event=events.append)
+        with self.assertRaisesRegex(RuntimeError, "本轮未完成"):
+            query_loop(state)
+        self.assertFalse(any(event["type"] == "response_end" for event in events))
+        execute.assert_not_called()
 
 
 if __name__ == "__main__":

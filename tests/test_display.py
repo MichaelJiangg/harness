@@ -1,10 +1,15 @@
 import json
 from io import StringIO
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 import unittest
 from unittest.mock import Mock, call, patch
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
 
 from harness.cli import run_cli
 from harness.client import APIError
@@ -27,6 +32,280 @@ class TerminalBuffer(StringIO):
 
 
 class DisplayTests(unittest.TestCase):
+    def test_mixed_tool_response_is_progress_then_a_single_final_answer(self):
+        progress = "关键信息到手，继续核实 Instin"
+        answer = "final-answer-marker"
+        search = {"id": "search-2", "type": "function", "function": {
+            "name": "web_search", "arguments": '{"query":"Instinct"}',
+        }}
+        requests = []
+
+        def complete(**request):
+            requests.append(request)
+            content = progress if len(requests) == 1 else answer
+            request["on_text"](content)
+            return reply(content, tool_calls=[search] if len(requests) == 1 else None)
+
+        def make_live(*args, **kwargs):
+            return Live(*args, auto_refresh=False, **kwargs)
+
+        execute = Mock(return_value={"status": "success", "executed": True, "tool": "web_search"})
+        with patch.dict(os.environ, {"TERM": "xterm"}), \
+                patch("harness.cli.Live", side_effect=make_live), \
+                patch("harness.cli.Panel", wraps=Panel) as panels, \
+                patch("harness.cli.create_tool_executor", return_value=execute):
+            session = CLISession(Mock(complete=complete), terminal=True,
+                                 character_delay=0, lines=("研究\n",))
+            try:
+                self.assertTrue(session.output.wait_for(answer))
+                output_text = visible_text(session.output.getvalue())
+                session.input.send("/activity\n")
+                self.assertTrue(session.output.wait_for("progress"))
+                session.close()
+            finally:
+                session.close()
+        self.assertIn("过程进度", output_text)
+        self.assertIn("继续执行工具", output_text)
+        self.assertLess(output_text.index(progress), output_text.index("⚙ 执行工具：web_search"))
+        self.assertLess(output_text.index("⚙ 执行工具：web_search"), output_text.index(answer))
+        self.assertEqual(output_text.count(progress), 1)
+        self.assertEqual(output_text.count(answer), 1)
+        titles = [item.kwargs.get("title") for item in panels.call_args_list]
+        self.assertIn("生成中（未完成）", titles)
+        self.assertIn("过程进度", titles)
+        self.assertEqual(titles.count("Assistant"), 1)
+        self.assertIn(progress, requests[1]["messages"][2]["content"])
+        self.assertEqual(execute.call_count, 1)
+
+    def test_pipe_marks_preview_progress_and_completion_without_repeating_text(self):
+        output = StringIO()
+        attempts = 0
+        search = {"id": "search-2", "type": "function", "function": {
+            "name": "web_search", "arguments": '{"query":"公开资料"}',
+        }}
+
+        def complete(**request):
+            nonlocal attempts
+            attempts += 1
+            text = "process-pipe-marker" if attempts == 1 else "final-pipe-marker"
+            request["on_text"](text)
+            return reply(text, tool_calls=[search] if attempts == 1 else None)
+
+        execute = Mock(return_value={"status": "success", "executed": True, "tool": "web_search"})
+        with patch("harness.cli.create_tool_executor", return_value=execute):
+            run_cli(Mock(complete=complete), input_stream=StringIO("研究\n"), output=output)
+        text = output.getvalue()
+        self.assertEqual(text.count("process-pipe-marker"), 1)
+        self.assertEqual(text.count("final-pipe-marker"), 1)
+        self.assertIn("生成中（未完成）", text)
+        self.assertIn("[过程进度] 继续执行工具。", text)
+        self.assertIn("[回答完成]", text)
+        self.assertNotIn("\x1b", text)
+
+    def test_failed_stream_is_preserved_as_incomplete_without_an_assistant_panel(self):
+        for failure in ("length", "disconnect"):
+            with self.subTest(failure=failure):
+                output = TerminalBuffer()
+                errors = StringIO()
+
+                def complete(**request):
+                    request["on_text"]("unfinished-marker")
+                    if failure == "disconnect":
+                        raise APIError("连接中断，本轮未完成。")
+                    result = reply("unfinished-marker")
+                    result["choices"][0]["finish_reason"] = "length"
+                    return result
+
+                def make_live(*args, **kwargs):
+                    return Live(*args, auto_refresh=False, **kwargs)
+
+                with patch.dict(os.environ, {"TERM": "xterm"}), \
+                        patch("harness.cli.Live", side_effect=make_live), \
+                        patch("harness.cli.Panel", wraps=Panel) as panels:
+                    run_cli(Mock(complete=complete), input_stream=TerminalBuffer("问题\n\n\n"),
+                            output=output, error_output=errors, character_delay=0)
+                text = visible_text(output.getvalue())
+                self.assertEqual(text.count("unfinished-marker"), 1)
+                self.assertIn("未完成", text)
+                self.assertIn("本轮未完成", visible_text(errors.getvalue()))
+                self.assertNotIn("Assistant", [item.kwargs.get("title") for item in panels.call_args_list])
+
+    def test_child_response_end_events_remain_silent(self):
+        def query(state):
+            state.on_event({"type": "response_start"})
+            for agent in ("delegate", "background", "swarm"):
+                for kind in ("tool_calls", "final"):
+                    state.on_event({"type": "response_end", "kind": kind,
+                                    "content": f"hidden-{agent}-{kind}", "agent": agent,
+                                    "finish_reason": "tool_calls" if kind == "tool_calls" else "stop"})
+            state.on_event({"type": "text", "text": "主回答。"})
+            state.on_event({"type": "response_end", "kind": "final",
+                            "content": "主回答。", "finish_reason": "stop"})
+            return "主回答。"
+
+        output = StringIO()
+        with patch("harness.cli.query_loop", side_effect=query):
+            run_cli(Mock(), input_stream=StringIO("问题\n"), output=output)
+        self.assertNotIn("hidden-", output.getvalue())
+        self.assertEqual(output.getvalue().count("主回答。"), 1)
+        self.assertIn("[回答完成]", output.getvalue())
+
+    def test_child_retry_keeps_main_preview_active_without_repeating_text(self):
+        def query(state):
+            state.on_event({"type": "response_start"})
+            state.on_event({"type": "text", "text": "main-prefix-"})
+            for agent in ("delegate", "background", "swarm"):
+                state.on_event({"type": "retry", "agent": agent, "partial": True,
+                                "message": "child-retry-marker", "delay": 0, "attempt": 1})
+            state.on_event({"type": "text", "text": "main-suffix"})
+            state.on_event({"type": "response_end", "kind": "final",
+                            "content": "main-prefix-main-suffix", "finish_reason": "stop"})
+            return "main-prefix-main-suffix"
+
+        def make_live(*args, **kwargs):
+            return Live(*args, auto_refresh=False, **kwargs)
+
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                output = TerminalBuffer() if terminal else StringIO()
+                input_stream = TerminalBuffer("问题\n\n\n") if terminal else StringIO("问题\n")
+                with patch.dict(os.environ, {"TERM": "xterm"}), \
+                        patch("harness.cli.query_loop", side_effect=query), \
+                        patch("harness.cli.Live", side_effect=make_live), \
+                        patch("harness.cli.Panel", wraps=Panel) as panels:
+                    run_cli(Mock(), input_stream=input_stream, output=output, character_delay=0)
+                text = visible_text(output.getvalue())
+                self.assertEqual(text.count("main-prefix-"), 1)
+                self.assertEqual(text.count("main-prefix-main-suffix"), 1)
+                self.assertNotIn("child-retry-marker", text)
+                titles = [item.kwargs.get("title") for item in panels.call_args_list]
+                self.assertNotIn("未完成", titles)
+                if terminal:
+                    previews = [item.args[0].markup for item in panels.call_args_list
+                                if item.kwargs.get("title") == "生成中（未完成）"]
+                    self.assertEqual(previews[-1], "main-prefix-main-suffix")
+                    self.assertEqual(titles.count("Assistant"), 1)
+                else:
+                    self.assertEqual(text.count("[回答完成]"), 1)
+
+    def test_tool_truncation_preserves_terminal_success_and_failure(self):
+        for status, marker in (("success", "✓ 完成"), ("error", "✗ 失败")):
+            with self.subTest(status=status):
+                output = TerminalBuffer()
+                tool_call = {"id": "search-1", "type": "function", "function": {
+                    "name": "web_search", "arguments": '{"query":"研究"}',
+                }}
+                client = Mock(complete=Mock(side_effect=[
+                    reply(None, tool_calls=[tool_call]), reply("处理完成。"),
+                ]))
+                result = {"status": status, "executed": True, "tool": "web_search",
+                          "message": "很长的结果" * 4000}
+                with patch("harness.cli.create_tool_executor", return_value=lambda *args: result):
+                    run_cli(client, input_stream=TerminalBuffer("研究\n\n\n"),
+                            output=output, character_delay=0)
+                text = visible_text(output.getvalue())
+                self.assertIn(marker, text)
+                self.assertIn("已截断", text)
+                returned = json.loads(next(message["content"]
+                                           for message in client.complete.call_args_list[1].kwargs["messages"]
+                                           if message["role"] == "tool"))
+                self.assertEqual(returned["status"], status)
+
+    def test_structurally_trimmed_search_reports_success_and_trimming(self):
+        output = TerminalBuffer()
+        tool_call = {"id": "search-1", "type": "function", "function": {
+            "name": "web_search", "arguments": '{"query":"研究"}',
+        }}
+        client = Mock(complete=Mock(side_effect=[
+            reply(None, tool_calls=[tool_call]), reply("处理完成。"),
+        ]))
+        result = {"status": "success", "executed": True, "tool": "web_search",
+                  "message": "搜索完成，返回 10 条结果。", "truncated": True}
+        with patch("harness.cli.create_tool_executor", return_value=lambda *args: result):
+            run_cli(client, input_stream=TerminalBuffer("研究\n\n\n"),
+                    output=output, character_delay=0)
+        text = visible_text(output.getvalue())
+        self.assertIn("✓ 完成", text)
+        self.assertIn("结果已裁剪", text)
+
+    def test_long_streamed_answer_is_printed_once_when_preview_stops(self):
+        output = TerminalBuffer()
+        content = "\n\n".join(
+            f"第 {index} 段长回答。" for index in range(30)
+        ) + "\n\nanswer-final-marker"
+
+        def complete(**request):
+            request["on_text"](content)
+            return reply(content)
+
+        def make_console(**kwargs):
+            return Console(width=80, height=8, **kwargs)
+
+        def make_live(*args, **kwargs):
+            return Live(*args, auto_refresh=False, **kwargs)
+
+        with patch.dict(os.environ, {"TERM": "xterm"}), \
+                patch("harness.cli.Console", side_effect=make_console), \
+                patch("harness.cli.Live", side_effect=make_live):
+            run_cli(
+                Mock(complete=complete), input_stream=TerminalBuffer("问题\n\n\n"),
+                output=output, character_delay=0,
+            )
+        text = visible_text(output.getvalue())
+        self.assertEqual(text.count("answer-final-marker"), 1)
+        for index in range(30):
+            self.assertEqual(text.count(f"第 {index} 段长回答。"), 1)
+
+    def test_long_chinese_table_cells_wrap_without_ellipsis(self):
+        cell = "正文" + "".join(chr(0x4e00 + index) for index in range(80)) + "末尾"
+        content = f"| 说明 |\n| --- |\n| {cell} |"
+        for width in (40, 80):
+            with self.subTest(width=width):
+                output = TerminalBuffer()
+
+                def make_console(**kwargs):
+                    return Console(width=width, **kwargs)
+
+                with patch.dict(os.environ, {"TERM": "xterm"}), \
+                        patch("harness.cli.Console", side_effect=make_console):
+                    run_cli(
+                        Mock(complete=Mock(return_value=reply(content))),
+                        input_stream=TerminalBuffer("问题\n\n\n"),
+                        output=output, character_delay=0,
+                    )
+                text = visible_text(output.getvalue())
+                normalized = "".join(
+                    character for character in text
+                    if not character.isspace() and character != "│"
+                )
+                self.assertIn(cell, normalized)
+                self.assertNotIn("…", text)
+
+    def test_narrow_terminal_keeps_long_paragraph_and_code_block(self):
+        paragraph = "开头" + "长中文段落需要完整换行显示" * 10 + "段落末尾"
+        code = 'payload = "' + "abcdefghijklmnopqrstuvwxyz" * 4 + '"'
+        content = paragraph + "\n\n```python\n" + code + "\n```"
+        for width in (40, 80):
+            with self.subTest(width=width):
+                output = TerminalBuffer()
+
+                def make_console(**kwargs):
+                    return Console(width=width, **kwargs)
+
+                with patch.dict(os.environ, {"TERM": "xterm"}), \
+                        patch("harness.cli.Console", side_effect=make_console):
+                    run_cli(
+                        Mock(complete=Mock(return_value=reply(content))),
+                        input_stream=TerminalBuffer("问题\n\n\n"),
+                        output=output, character_delay=0,
+                    )
+                normalized = "".join(
+                    character for character in visible_text(output.getvalue())
+                    if not character.isspace() and character != "│"
+                )
+                self.assertIn(paragraph, normalized)
+                self.assertIn(code.replace(" ", ""), normalized)
+
     def test_terminal_writes_each_character_with_default_delay(self):
         abort = Event()
         output = TerminalBuffer()
@@ -178,7 +457,7 @@ class DisplayTests(unittest.TestCase):
             run_cli(Mock(complete=complete), ledger=ledger, input_stream=StringIO("问题\n"), output=output)
         text = output.getvalue()
         self.assertLess(text.index("旧草稿"), text.index("上次输出未完成，重新生成"))
-        self.assertLess(text.index("重新生成"), text.index("\nDeepSeek > 新回答"))
+        self.assertLess(text.index("重新生成"), text.index("\nDeepSeek > [生成中（未完成）] 新回答"))
         self.assertNotIn("旧草稿新回答", text)
         self.assertEqual(text.count("新回答"), 1)
         self.assertEqual(ledger.summary()["requests"], 2)

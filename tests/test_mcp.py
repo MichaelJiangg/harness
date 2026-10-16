@@ -64,6 +64,98 @@ class FakePopen:
 
 
 class MCPTests(unittest.TestCase):
+    def test_discovered_tavily_search_repeats_without_confirmation_and_audits_allow(self):
+        for mode in ("ask", "auto"):
+            with self.subTest(mode=mode), TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                responses = [
+                    {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05"}},
+                    {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{
+                        "name": "tavily_search", "inputSchema": {
+                            "type": "object", "properties": {"query": {"type": "string"}},
+                        },
+                    }]}},
+                    {"jsonrpc": "2.0", "id": 3, "result": {
+                        "content": [{"type": "text", "text": "first search result"}],
+                    }},
+                    {"jsonrpc": "2.0", "id": 4, "result": {
+                        "content": [{"type": "text", "text": "second search result"}],
+                    }},
+                ]
+                with patch("harness.mcp.subprocess.Popen",
+                           return_value=FakePopen(responses, persistent=True)):
+                    manager = MCPManager(
+                        [MCPServerConfig("tavily", "fake-server", ())], reconnect=False,
+                    )
+                try:
+                    definition, = manager.tool_definitions()
+                    self.assertEqual(definition.name, "mcp_tavily_tavily_search")
+                    confirm = Mock(return_value=False)
+                    executor = create_tool_executor(
+                        root, confirm=confirm,
+                        permissions=PermissionPolicy(mode=mode, **get_settings()["permissions"]),
+                        extra_tools=[(definition, lambda arguments, workspace: manager.execute(
+                            arguments, workspace, internal_name=definition.name,
+                        ))],
+                    )
+                    for query, content in (("MUSE personal agent", "first search result"),
+                                           ("个人智能体产品", "second search result")):
+                        result = executor(definition.name, {"query": query})
+                        self.assertEqual(result["status"], "success")
+                        self.assertTrue(result["executed"])
+                        self.assertEqual(result["content"], content)
+                    confirm.assert_not_called()
+                    log = (root / ".harness/permission.log").read_text(encoding="utf-8")
+                    entries = [json.loads(line) for line in log.splitlines()]
+                    self.assertEqual([entry["event"] for entry in entries],
+                                     ["decision", "before_execute"] * 2)
+                    self.assertTrue(all(entry["decision"] == "allow" for entry in entries))
+                    self.assertTrue(all(entry["confirmation"] is None for entry in entries))
+                    self.assertTrue(all(entry["risk"] == "medium" for entry in entries))
+                    self.assertEqual(len({entry["call_id"] for entry in entries}), 2)
+                    self.assertNotIn("MUSE personal agent", log)
+                    self.assertNotIn("个人智能体产品", log)
+                finally:
+                    manager.close()
+
+    def test_tavily_default_allow_keeps_other_tools_and_explicit_restrictions(self):
+        search_name = "mcp_tavily_tavily_search"
+        cases = [
+            (name, {}, "confirmation_denied") for name in (
+                "mcp_tavily_tavily_extract", "mcp_tavily_tavily_search_extra",
+                "mcp_other_tavily_search", "mcp_Tavily_tavily_search",
+            )
+        ] + [
+            (search_name, {"ask": [search_name]}, "confirmation_denied"),
+            (search_name, {"deny": [search_name]}, "permission_denied"),
+            (search_name, {"rules": [{"tool": search_name, "action": "ask"}]},
+             "confirmation_denied"),
+            (search_name, {"rules": [{"tool": search_name, "action": "deny"}]},
+             "permission_denied"),
+        ]
+        for mode in ("ask", "auto"):
+            for name, overrides, code in cases:
+                with self.subTest(mode=mode, tool=name, overrides=overrides), \
+                        TemporaryDirectory() as directory:
+                    definition = ToolDefinition(name, "外部工具。", {}, validate_arguments=False)
+                    handler = Mock(return_value={"status": "success"})
+                    confirm = Mock(return_value=False)
+                    policy = {**get_settings()["permissions"], **overrides}
+                    executor = create_tool_executor(
+                        directory, confirm=confirm,
+                        permissions=PermissionPolicy(mode=mode, **policy),
+                        extra_tools=[(definition, handler)],
+                    )
+                    arguments = {"query": "search request"}
+                    result = executor(name, arguments)
+                    self.assertEqual(result["code"], code)
+                    self.assertFalse(result["executed"])
+                    handler.assert_not_called()
+                    if code == "permission_denied":
+                        confirm.assert_not_called()
+                    else:
+                        confirm.assert_called_once_with(name, arguments, Path(directory).resolve())
+
     def test_load_server_configs_reads_json_file_before_pyproject(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -292,6 +384,69 @@ class MCPTests(unittest.TestCase):
 
 
 class MCPCLIIntegrationTests(unittest.TestCase):
+    def test_repeated_tavily_search_skips_confirmation_in_terminal_and_pipe(self):
+        name = "mcp_tavily_tavily_search"
+        definition = ToolDefinition(name, "搜索公开网页。", {
+            "type": "object", "properties": {"query": {"type": "string"}},
+        }, validate_arguments=False)
+        for mode in ("ask", "auto"):
+            for terminal in (True, False):
+                with self.subTest(mode=mode, terminal=terminal), TemporaryDirectory() as directory:
+                    root = Path(directory).resolve()
+                    manager = Mock()
+                    manager.tool_definitions.return_value = [definition]
+                    manager.load_errors = []
+                    manager.tool_names.return_value = ["tavily_search"]
+                    manager.status.return_value = [{
+                        "name": "tavily", "state": "connected", "tool_count": 1,
+                        "uptime_seconds": 1, "last_error": None, "attempts": 1,
+                    }]
+                    manager.execute.side_effect = [
+                        {"status": "success", "content": "first search result"},
+                        {"status": "success", "content": "second search result"},
+                    ]
+                    queries = ("MUSE personal agent", "个人智能体产品")
+                    calls = [{
+                        "id": f"search_{index}", "type": "function", "function": {
+                            "name": name, "arguments": json.dumps({"query": query}),
+                        },
+                    } for index, query in enumerate(queries)]
+                    client = Mock(complete=Mock(side_effect=[
+                        reply(None, tool_calls=[calls[0]]),
+                        reply(None, tool_calls=[calls[1]]), reply("两次搜索完成。"),
+                    ]))
+                    settings = get_settings()
+                    settings["security"]["mode"] = mode
+                    with patch("harness.cli.get_settings", return_value=settings), \
+                            patch("harness.tools.executor.get_settings", return_value=settings), \
+                            patch("harness.tools.executor.Path.cwd", return_value=root), \
+                            patch("harness.cli.load_server_configs", return_value=([], "mock MCP")), \
+                            patch("harness.cli.MCPManager", return_value=manager):
+                        session = CLISession(
+                            client, lines=("搜索个人智能体产品\n",), terminal=terminal,
+                            character_delay=0, run_cli_kwargs={"mcp_enabled": True},
+                        )
+                        try:
+                            self.assertTrue(session.output.wait_for("两次搜索完成。"))
+                        finally:
+                            session.close()
+                    self.assertEqual(client.complete.call_count, 3)
+                    self.assertEqual(manager.execute.call_count, 2)
+                    self.assertEqual([call.args for call in manager.execute.call_args_list],
+                                     [({"query": query}, root) for query in queries])
+                    self.assertTrue(all(call.kwargs == {"internal_name": name}
+                                        for call in manager.execute.call_args_list))
+                    messages = client.complete.call_args_list[2].kwargs["messages"]
+                    results = [message for message in messages if message["role"] == "tool"]
+                    self.assertEqual([message["tool_call_id"] for message in results],
+                                     ["search_0", "search_1"])
+                    self.assertEqual([json.loads(message["content"])["content"] for message in results],
+                                     ["first search result", "second search result"])
+                    self.assertNotIn("[工具确认]", session.output.getvalue())
+                    self.assertNotIn("批准本次外部 MCP 工具", session.output.getvalue())
+                    self.assertEqual(session.errors.getvalue(), "")
+                    manager.close.assert_called_once()
+
     def test_external_tool_is_merged_and_forwarded(self):
         definition = ToolDefinition(
             "mcp_filesystem_search", "搜索文件。", {

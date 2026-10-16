@@ -102,6 +102,40 @@ class PermissionRulesIntegrationTests(unittest.TestCase):
                 confirm.assert_not_called()
         self.assertFalse((self.root / "tests").exists())
 
+    def test_auto_mode_does_not_execute_denied_files_or_commands(self):
+        cases = (
+            ("write_file", {"path": "restricted/note.txt", "content": "禁止写入"},
+             {"directory": "restricted", "name": "default"}),
+            ("bash", {"command": "echo permission-denied"},
+             {"command_pattern": "permission-denied"}),
+        )
+        for name, arguments, conditions in cases:
+            with self.subTest(tool=name):
+                confirm = Mock(return_value=True)
+                rules = [{"tool": name, "action": "deny", **conditions}]
+                result = self.executor(rules, mode="auto", confirm=confirm)(name, arguments)
+                self.assertEqual(result["code"], "permission_denied")
+                self.assertFalse(result["executed"])
+                confirm.assert_not_called()
+        self.assertFalse((self.root / "restricted").exists())
+
+    def test_auto_mode_requires_confirmation_for_matching_ask_rules(self):
+        cases = (
+            ("write_file", {"path": "restricted/note.txt", "content": "未批准"},
+             {"directory": "restricted", "name": "default"}),
+            ("bash", {"command": "echo permission-ask"},
+             {"command_pattern": "permission-ask"}),
+        )
+        for name, arguments, conditions in cases:
+            with self.subTest(tool=name):
+                confirm = Mock(return_value=False)
+                rules = [{"tool": name, "action": "ask", **conditions}]
+                result = self.executor(rules, mode="auto", confirm=confirm)(name, arguments)
+                self.assertEqual(result["code"], "confirmation_denied")
+                self.assertFalse(result["executed"])
+                confirm.assert_called_once_with(name, arguments, self.root)
+        self.assertFalse((self.root / "restricted").exists())
+
     def test_rule_denial_and_allowed_write_return_corresponding_tool_ids_to_the_model(self):
         rules = [self.write_allow, {
             "tool": "write_file", "action": "deny", "directory": "tests/private", "priority": 0,

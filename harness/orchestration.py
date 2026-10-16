@@ -76,7 +76,7 @@ def run_delegate(*, description, task, executor_factory, tools):
 
     def on_child_event(event):
         # 子回答由主 AI 整理后显示，不把两个回答流拼在同一行。
-        if event["type"] not in {"text", "response_start"}:
+        if event["type"] not in {"text", "response_start", "response_end"}:
             parent.on_event({**event, "agent": "delegate"})
 
     child = QueryState(
@@ -189,7 +189,7 @@ def run_swarm(*, parent, description, task, roles, max_rounds, make_executor):
         parent.on_event({**event, "agent": "swarm", **extra})
 
     def role_event(event):
-        if event["type"] not in {"text", "response_start"}:
+        if event["type"] not in {"text", "response_start", "response_end"}:
             emit(event, role=current.name, round=round_num)
 
     emit({"type": "swarm_start", "description": description},

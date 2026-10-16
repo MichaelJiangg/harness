@@ -20,7 +20,7 @@ DEFAULT_POLICY = {"low": "allow", "medium": "ask", "high": "ask"}
 
 def get_risk_level(tool_name, params=None):
     """评估操作本身的风险，不在这里判断规则或询问用户。"""
-    if tool_name in {"read_file", "grep", "notes_read"}:
+    if tool_name in {"read_file", "grep", "notes_read", "web_fetch", "web_search"}:
         return "low"
     if tool_name == "background_check":
         return "low"
@@ -43,6 +43,7 @@ class PermissionDecision:
     risk: str
     matched_rule: str
     reason: str
+    rule_matched: bool = False
 
 
 def build_denial_message(tool_name, params, reason):
@@ -170,7 +171,8 @@ def check_permission(tool_name, params, rules, *, workspace=None, default=None, 
     for rule in rules:
         if rule.matches(tool_name, params, workspace=workspace):
             result = PermissionDecision(rule.action, risk, rule.name or "rule",
-                                        f"命中权限规则「{rule.name or 'rule'}」，决策为 {rule.action}。")
+                                        f"命中权限规则「{rule.name or 'rule'}」，决策为 {rule.action}。",
+                                        rule_matched=True)
             break
     # 若循环没有命中，result 仍是上面准备的兜底结果。
     return result if details else result.decision
@@ -217,9 +219,6 @@ class PermissionPolicy:
         # 工具级 deny 直接返回，目录规则和会话授权都不能覆盖它。
         if name in self.deny:
             return PermissionDecision("deny", risk, "tools:deny", "当前工具位于配置的 deny 列表中。")
-        if self.mode == "auto" and self._auto_allowed(name, params, workspace):
-            return PermissionDecision("allow", risk, "session:auto",
-                                      "auto 模式已授权当前工作区内操作。")
         # 以下只是准备兜底，并不提前返回；细粒度规则仍有机会先决定结果。
         # 写文件不能仅凭工具名 allow 放行，Bash 的 allow 也不能跳过风险判断。
         if name in self.ask or name == "write_file":
@@ -230,7 +229,12 @@ class PermissionPolicy:
             default = None
         # 核心循环：首条规则匹配生效，否则采用刚才准备的兜底。
         result = check_permission(name, params, self.rules, workspace=workspace, default=default, details=True)
-        if result.matched_rule == "default" and default is not None:
+        if result.rule_matched:
+            return result
+        if self.mode == "auto" and self._auto_allowed(name, params, workspace):
+            return PermissionDecision("allow", risk, "session:auto",
+                                      "auto 模式已授权当前工作区内操作。")
+        if default is not None:
             result = replace(result, matched_rule=f"tools:{default}", reason="使用工具级默认权限配置。")
         return result
 

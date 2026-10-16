@@ -122,6 +122,7 @@ class PageManagementTests(unittest.TestCase):
             cursor = (page["next_offset"], page["next_column"])
         self.assertEqual(state.ledger.summary()["requests"], len(pages) + 1)
         for request in state.client.requests:
+            self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
             self.assert_complete_tool_batches(request["messages"])
 
     def test_main_current_turn_compacts_old_pages_and_keeps_recent_user_turn(self):
@@ -154,20 +155,39 @@ class PageManagementTests(unittest.TestCase):
             self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
             self.assert_complete_tool_batches(request["messages"])
         for request in state.client.summary_inputs:
+            self.assertLessEqual(context_size(request, []), state.context_limit)
             summary_source = json.loads(request[-1]["content"].split("\n", 1)[1])
             self.assert_complete_tool_batches(summary_source)
             for message in previous + [original_task]:
                 self.assertNotIn(message, summary_source)
 
-    def test_single_current_tool_batch_over_budget_can_grow_before_compaction(self):
+    def test_single_current_tool_batch_over_budget_stops_without_another_request(self):
         content = "首行" + "长" * 2300 + "\r\n" + "短行\n" * 320 + "尾行"
         state = self.state(content)
         state.context_limit = (context_size(state.messages, state.tools)
                                + state.tool_result_limit - 200)
-        self.assertEqual(query_loop(state), "文件各页已读取完毕。")
-        self.assertTrue(state.client.summary_inputs)
-        self.assertEqual("".join(page["content"] for page in state.client.pages), content)
-        self.assertTrue(state.client.pages[-1]["eof"])
+        snapshot = {}
+
+        def capture_first_page(event):
+            if event["type"] == "tool" and not snapshot:
+                snapshot["messages"] = deepcopy(state.messages)
+                snapshot["progress"] = deepcopy(state.read_progress)
+
+        state.on_event = capture_first_page
+        with self.assertRaises(ContextTooLong) as raised:
+            query_loop(state)
+        self.assertEqual(len(state.client.requests), 1)
+        self.assertFalse(state.client.summary_inputs)
+        self.assertEqual(state.messages, snapshot["messages"])
+        self.assertEqual(state.read_progress, snapshot["progress"])
+        latest = json.loads(state.messages[-1]["content"])
+        self.assertFalse(latest["eof"])
+        self.assert_resume_cursor(raised.exception, latest)
+        self.assertEqual(state.read_progress[self.path], {
+            key: latest[key] for key in ("next_offset", "next_column", "eof")
+        })
+        request = state.client.requests[0]
+        self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
 
     def test_request_limit_error_reports_the_latest_unread_cursor(self):
         state = self.state("很长的行" * 2500, max_requests=2)
@@ -234,6 +254,7 @@ class PageManagementTests(unittest.TestCase):
                             for event in events))
         self.assertEqual(state.ledger.summary()["requests"], len(child.requests) + 2)
         for request in child.requests:
+            self.assertLessEqual(context_size(request["messages"], request["tools"]), state.context_limit)
             if request["tools"]:
                 self.assert_complete_tool_batches(request["messages"])
 

@@ -218,8 +218,8 @@ class DelegateCLITests(unittest.TestCase):
         self.assertIn("compact：正在总结旧对话", output)
         self.assertIn("compact：已将上下文", output)
         self.assertIn("compact：历史较短", output)
-        self.assertIn("[delegate] [重试] 上次输出未完成", output)
-        self.assertIn("[delegate] [重试] 暂时失败", output)
+        self.assertIn("[delegate] retry：暂时失败", output)
+        self.assertNotIn("[delegate] [重试]", output)
         self.assertEqual(session.errors.getvalue(), "")
 
 

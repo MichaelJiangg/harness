@@ -270,8 +270,8 @@ _DEFAULT_SETTINGS = {
         },
     },
     "permissions": {
-        "allow": ["read_file", "grep", "delegate", "notes_append"],
-        "ask": ["write_file", "notes_replace", "web_fetch", "web_search"],
+        "allow": ["read_file", "grep", "delegate", "notes_append", "web_fetch", "web_search", "mcp_tavily_tavily_search"],
+        "ask": ["write_file", "notes_replace"],
         "deny": [],
         "rules": [],
     },
